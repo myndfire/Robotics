@@ -1,0 +1,13 @@
+{
+  "name": "LedRGBController",
+  "version": "1.0.0",
+  "description": "Self-contained NeoPixel RGB LED wrapper with status-level semantics (ON/OFF/boot)",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "adafruit/Adafruit NeoPixel": "*"
+  }
+}

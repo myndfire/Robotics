@@ -1,0 +1,11 @@
+{
+    "name": "StatusDashboard",
+    "version": "1.0.0",
+    "description": "Multi-task system status dashboard with scrolling OLED display. Composes DisplayController + WiFi for RSSI. Runs 4 FreeRTOS tasks (timer, sensor, stats, display) with per-line horizontal marquee scrolling.",
+    "authors": [{ "name": "MoistureMonitorAgent" }],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"],
+    "dependencies": {
+        "olikraus/U8g2": "*"
+    }
+}

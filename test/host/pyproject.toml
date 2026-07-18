@@ -1,0 +1,18 @@
+[project]
+name = "robotics-host-tests"
+version = "1.0.0"
+description = "Host-side test scripts for ESP32-S3 firmware services"
+requires-python = ">=3.10"
+dependencies = [
+    "embedded-system-services",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+embedded-system-services = { path = "../../python-libs" }
+
+[tool.uv]
+package = false

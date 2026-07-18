@@ -1,0 +1,11 @@
+{
+    "name": "CameraWebServer",
+    "version": "1.0.0",
+    "description": "WiFi-connected MJPEG camera web server with captive portal setup. Composes CameraController + WiFiManager + HTTP server. Provides snapshot capture and live MJPEG streaming at /camera/capture and /camera/stream.",
+    "authors": [{ "name": "MoistureMonitorAgent" }],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"],
+    "dependencies": {
+        "tzapu/WiFiManager": "*"
+    }
+}

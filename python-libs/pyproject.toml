@@ -1,0 +1,15 @@
+[project]
+name = "embedded-system-services"
+version = "1.0.0"
+description = "Host-side Python client library for ESP32-S3 embedded system services — BLE camera control, BLE GPIO API, and more."
+requires-python = ">=3.10"
+dependencies = [
+    "bleak>=0.22",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]

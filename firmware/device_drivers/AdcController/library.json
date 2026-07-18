@@ -1,0 +1,10 @@
+{
+  "name": "AdcController",
+  "version": "1.0.0",
+  "description": "General-purpose ESP32-S3 ADC wrapper with per-pin attenuation, e-fuse calibrated millivolt reading, and multi-sample averaging",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

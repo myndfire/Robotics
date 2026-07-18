@@ -1,0 +1,11 @@
+{
+    "name": "TimedCycleController",
+    "version": "1.0.0",
+    "description": "Duty-cycle pump/valve/solenoid controller with NVS-persisted ON/OFF durations. Composes RelayController + DisplayController + StorageController. Runs FreeRTOS relay and display tasks with live countdown timers and serial command interface.",
+    "authors": [{ "name": "MoistureMonitorAgent" }],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"],
+    "dependencies": {
+        "olikraus/U8g2": "*"
+    }
+}

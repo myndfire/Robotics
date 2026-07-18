@@ -1,0 +1,10 @@
+{
+  "name": "MoistureSensorController",
+  "version": "1.0.0",
+  "description": "LM393 analog soil moisture sensor driver (ADC-based)",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

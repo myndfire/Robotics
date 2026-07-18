@@ -1,0 +1,10 @@
+{
+  "name": "RelayController",
+  "version": "1.0.0",
+  "description": "GPIO-driven relay controller with auto/manual modes",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

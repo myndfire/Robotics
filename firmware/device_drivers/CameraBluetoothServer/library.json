@@ -1,0 +1,10 @@
+{
+  "name": "CameraBluetoothServer",
+  "version": "1.0.0",
+  "description": "BLE camera server for ESP32-S3 — serves JPEG snapshots via BLE GATT with settings control, chunked frame delivery, and FreeRTOS producer-consumer architecture",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

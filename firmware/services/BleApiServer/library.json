@@ -1,0 +1,11 @@
+{
+    "name": "BleApiServer",
+    "version": "1.0.0",
+    "description": "BLE peripheral server exposing GPIO control and NeoPixel LED control over BLE GATT characteristics. Advertises as ESP32-API with control and status characteristics.",
+    "authors": [{ "name": "MoistureMonitorAgent" }],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"],
+    "dependencies": {
+        "adafruit/Adafruit NeoPixel": "^1.12.4"
+    }
+}

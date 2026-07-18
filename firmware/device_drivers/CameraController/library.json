@@ -1,0 +1,10 @@
+{
+  "name": "CameraController",
+  "version": "1.0.0",
+  "description": "ESP32 camera driver wrapper for OV2640/OV5640 over DVP — board presets, frame capture, sensor settings, flash LED control. Zero external dependencies (esp_camera bundled with Arduino-ESP32 framework).",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

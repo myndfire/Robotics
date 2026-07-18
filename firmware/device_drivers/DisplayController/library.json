@@ -1,0 +1,13 @@
+{
+  "name": "DisplayController",
+  "version": "2.0.0",
+  "description": "SSD1306 128x32/128x64 OLED I2C display wrapper with U8g2, per-line marquee scrolling, and FreeRTOS-safe concurrent updates",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "olikraus/U8g2": "*"
+  }
+}

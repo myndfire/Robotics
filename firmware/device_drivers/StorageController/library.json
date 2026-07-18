@@ -1,0 +1,10 @@
+{
+  "name": "StorageController",
+  "version": "1.0.0",
+  "description": "Full CRUD key-value store over ESP32 NVS (Preferences) with namespace management, key existence check, free space query, and factory reset",
+  "authors": {
+    "name": "MoistureMonitorAgent"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
