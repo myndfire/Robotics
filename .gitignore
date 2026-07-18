@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# PlatformIO build artifacts
+.pio/
+
+# Project virtual environment (uv)
+.venv/
+
+# Camera test artifacts
+*.jpg
+
+# macOS
+.DS_Store
