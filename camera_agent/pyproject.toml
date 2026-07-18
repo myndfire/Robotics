@@ -1,0 +1,20 @@
+[project]
+name = "camera-agent"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-harness",
+    "embedded-system-services",
+    "opentelemetry-api>=1.27,<1.30",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+agent-harness = { git = "https://github.com/myndfire/pydanticai-fluent.git", subdirectory = "agent_harness" }
+embedded-system-services = { git = "https://github.com/myndfire/Robotics.git", subdirectory = "python-libs" }
