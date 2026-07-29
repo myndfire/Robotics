@@ -11,7 +11,7 @@ Prerequisites:
 """
 
 import asyncio
-from camera_agent.agent import create_agent
+from camera_agent.agent_factory import create_agent
 from agent_harness.memory import MessageHistory
 
 

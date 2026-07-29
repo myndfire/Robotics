@@ -16,5 +16,8 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.uv.sources]
-agent-harness = { git = "https://github.com/myndfire/pydanticai-fluent.git", subdirectory = "agent_harness" }
+# Local checkout while the multimodal prompt change is unreleased. Switch back
+# to the git source once it lands upstream:
+#   agent-harness = { git = "https://github.com/myndfire/pydanticai-fluent.git", subdirectory = "agent_harness" }
+agent-harness = { path = "../../pydanticai-fluent/agent_harness", editable = true }
 embedded-system-services = { git = "https://github.com/myndfire/Robotics.git", subdirectory = "python-libs" }

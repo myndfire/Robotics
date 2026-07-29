@@ -9,23 +9,24 @@ Host-side test scripts that communicate with ESP32-S3 firmware services over BLE
 - **Bluetooth enabled** on your laptop (System Settings > Bluetooth > On)
 - **PlatformIO** (installed via `uv sync` at the repo root — see below)
 
+> **Note on `pip`:** The root `pyproject.toml` includes `pip` in its `[dependency-groups] dev` list. This is required because PlatformIO's `tool-esptoolpy` package runs a post-install script that calls `pip` to install Python dependencies (`cryptography`, `ecdsa`, `bitstring`, `reedsolo`, `intelhex`). Without `pip` in the uv venv, this script fails and corrupts the PlatformIO package cache, leading to `MissingPackageManifestError`.
+
 ## Quick Start
 
 ```bash
-# From repo root — install firmware build tools once
+# From repo root — install everything once (root + test/host deps)
 uv sync
 
-# From test/host/ — install host test deps once
-cd test/host
-uv sync
-
-# Flash firmware, then run tests
-cd ../../firmware/apps/CameraBLE
+# Flash firmware from its app directory (or anywhere — uv finds the workspace root)
+cd firmware/apps/CameraBLE
 uv run pio run --target upload
 
+# Run tests from test/host (or anywhere — uv finds the workspace root)
 cd ../../test/host
 uv run python test_camera_ble.py --stream 3
 ```
+
+> **Tip:** `uv run` can be invoked from any subdirectory of the workspace. uv automatically walks up the directory tree to find `pyproject.toml` and uses the workspace-root venv. You don't need to `cd` to specific directories to run commands.
 
 ---
 
@@ -84,7 +85,71 @@ uv run python test_camera_ble.py --params
 uv run python test_camera_ble.py --reset
 ```
 
+### What `uv run python test_camera_ble.py --stream 3` does
+
+This command runs the host-side BLE test client that communicates with the **CameraBluetoothServer** firmware on your ESP32-S3 CAM. Here's the full flow:
+
+1. **BLE Scan** — Scans for nearby BLE peripherals advertising the name `ESP32-CAM` (default timeout: 10 seconds).
+2. **Connect & Discover** — Connects to the ESP32 and discovers the Camera Service (`0000CA00-...`) and its characteristics:
+   - **CA01** Control (write)
+   - **CA02** Settings (read/write)
+   - **CA03** Frame (notify)
+   - **CA04** Info (read)
+   - **CA05** Params (read)
+3. **Send Snapshot Command** — Writes `"snapshot"` to the **CA01** Control characteristic. The firmware's `camera_task` (Core 0) captures a fresh JPEG frame and queues it.
+4. **Receive Chunked JPEG over BLE** — The firmware sends the JPEG via **CA03** notifications in 240-byte chunks:
+   - **Notification 1**: `[4 bytes: total size LE]` + `[up to 240 bytes: first data]`
+   - **Notifications 2+**: `[up to 240 bytes: continuation data]`
+5. **Reassemble & Save** — The client accumulates chunks until `total_size` bytes are received, then saves the JPEG.
+6. **Repeat 3 times** — Because of `--stream 3`, steps 3–5 repeat 3 times with a 1-second delay between shots (default `--delay`).
+7. **Output files** — Saves each snapshot as `snapshot_000.jpg`, `snapshot_001.jpg`, `snapshot_002.jpg`.
+
+> **Tip:** You can run this from any subdirectory of the workspace. `uv run` walks up to the repo root and uses the workspace venv.
+
+### Web Bluetooth (Browser) Compatibility
+
+The CameraBLE firmware is also accessible from **Web Bluetooth**-capable browsers (Chrome, Edge, Opera on macOS/Windows/Android). The firmware explicitly includes the **BLE2902 CCCD descriptor** on the CA03 Frame characteristic, which is required by the Web Bluetooth API to enable notifications via `characteristic.startNotifications()`.
+
+```javascript
+// Browser example (Web Bluetooth API)
+const service = await server.getPrimaryService('0000ca00-0000-1000-8000-00805f9b34fb');
+const frameChar = await service.getCharacteristic('0000ca03-0000-1000-8000-00805f9b34fb');
+await frameChar.startNotifications();
+frameChar.addEventListener('characteristicvaluechanged', (event) => {
+    const data = event.target.value;
+    // Reassemble JPEG chunks...
+});
+```
+
+> **Note:** Safari and Firefox do not support Web Bluetooth. Use Chrome or Edge. iOS (15.4+) supports Web Bluetooth in third-party browsers using the `WKWebView` entitlement.
+
 The test client scans for BLE devices advertising as `ESP32-CAM` and reassembles JPEG frames from the chunked BLE notification protocol (first notification: 4-byte LE total_size header + up to 240 bytes data; subsequent notifications: up to 240 bytes continuation data).
+
+### What `test_camera_ble.py` Tests (Indirectly)
+
+`test_camera_ble.py` communicates over BLE — it never imports firmware C++ code.
+However, many test scenarios exercise internal device drivers inside the ESP32:
+
+| Test Flag | BLE Characteristic | Firmware Driver Involved | What It Tests |
+|---|---|---|---|
+| `--save` | CA01 (Control) | `StorageController` | NVS write persistence |
+| `--reset` | CA01 (Control) | `StorageController` | NVS erase + reboot |
+| `--settings` | CA02 (Settings) | `CameraController` | Current sensor config |
+| `--set` | CA02 (Settings) | `CameraController` | Sensor register writes |
+| `--flash` | CA01 (Control) | `LedRGBController` | Flash LED on/off timing |
+| *(default)* | CA03 (Frame) | `CameraController` | DMA capture → JPEG encode → PSRAM |
+
+The dependency chain is:
+
+```
+test_camera_ble.py (Python host)
+  └─ CameraBleClient (Python)
+       └─ bleak / BLE GATT
+            └─ CameraBluetoothServer (ESP32 firmware)
+                 ├─ CameraController  → OV2640 sensor + DMA + JPEG
+                 ├─ StorageController → NVS persistence
+                 └─ LedRGBController  → Flash LED
+```
 
 ### Settings Reference
 
@@ -155,7 +220,6 @@ Communicates with the **BleApiServer** firmware service running on an **ESP32-S3
 
 ```bash
 cd firmware/apps/BleApiServerDemo
-uv sync                                  # PlatformIO deps (once)
 
 # ESP32-S3 DevKitC-1 (default — NeoPixel GPIO 48, NEO_GRB)
 uv run pio run -e esp32-s3-devkitc-1 --target upload
@@ -256,6 +320,116 @@ These settings are automatically persisted to NVS.
 
 Default (no action flags): reads and prints the full device state (LED color and all configured pin values).
 
+### What `test_ble_api.py` Tests (Indirectly)
+
+`test_ble_api.py` communicates over BLE — it never imports firmware C++ code.
+However, many test scenarios exercise internal device drivers inside the ESP32:
+
+| Test Flag | BLE Characteristic | Firmware Driver Involved | What It Tests |
+|---|---|---|---|
+| `--set 4:1` | BA01 (Control) | `GpioController` | Digital write |
+| `--set 4:1:persist` | BA01 (Control) | `GpioController` + `StorageController` | Digital write + NVS persistence |
+| `--config "pin=4:out"` | BA01 (Control) | `GpioController` | Pin mode config |
+| `--config "pin=4:out:persist"` | BA01 (Control) | `GpioController` + `StorageController` | Pin mode + NVS persistence |
+| `--led red` | BA01 (Control) | `LedRGBController` | NeoPixel colour |
+| `--get 7` | BA01 (Control) | `GpioController` | Digital/analog read |
+
+The dependency chain is:
+
+```
+test_ble_api.py (Python host)
+  └─ BleApiClient (Python)
+       └─ bleak / BLE GATT
+            └─ BleApiServer (ESP32 firmware)
+                 ├─ GpioController    → GPIO read/write
+                 ├─ LedRGBController  → NeoPixel LED
+                 └─ StorageController → NVS persistence
+```
+
+---
+
+## ConfigStore (`ConfigStoreDemo`)
+
+Communicates with the **ConfigStore** firmware service over **USB Serial UART** (not BLE). The ESP32-S3 exposes a command-line interface at 921600 baud for reading/writing typed NVS settings: device name (`String`), interval (`int`), enabled flag (`bool`), and gain (`float`). All values persist across power cycles.
+
+### Flash the Firmware
+
+```bash
+cd firmware/apps/ConfigStoreDemo
+uv run pio run --target upload
+uv run pio run --target upload --target monitor
+```
+
+Requires an OLED display wired to GPIO 41 (SDA) / GPIO 42 (SCL). See `firmware/services/ConfigStore/README.md` for wiring details.
+
+### Python Test Client
+
+*Requires USB cable connection (not Bluetooth).*
+
+```bash
+# Auto-detect port, run all tests
+uv run python test_config_store.py
+
+# Specify port explicitly
+uv run python test_config_store.py --port /dev/cu.usbmodem1101
+
+# Test NVS persistence across reboot (DTR toggle)
+uv run python test_config_store.py --test-persist
+
+# Read current config only
+uv run python test_config_store.py --show-only
+```
+
+### Serial Commands (Firmware-side)
+
+| Command | Action |
+|---|---|
+| `name <str>` | Set device name |
+| `intv <N>` | Set interval seconds |
+| `enab <0\|1>` | Enable/disable |
+| `gain <N.N>` | Set gain multiplier |
+| `show` | Display all values |
+| `list` | List stored keys |
+| `clear` | Reset to defaults |
+
+### Test Scenarios
+
+The test script validates:
+- Reading initial config
+- Setting all four typed values (String, int, bool, float)
+- Verifying responses match expected output
+- Listing keys and confirming all are stored
+- Optional: persistence across power cycle (`--test-persist`)
+- Reset to defaults and verification
+
+### What `test_config_store.py` Tests (Indirectly)
+
+`test_config_store.py` communicates over USB Serial UART — it never imports firmware C++ code.
+However, every test scenario exercises internal device drivers inside the ESP32:
+
+| Test Scenario | Serial Command | Firmware Driver Involved | What It Tests |
+|---|---|---|---|
+| Read config | `show` | `StorageController` | NVS read |
+| Set name | `name <str>` | `StorageController` | NVS write (String) |
+| Set interval | `intv <N>` | `StorageController` | NVS write (int) |
+| Set enabled | `enab <0\|1>` | `StorageController` | NVS write (bool) |
+| Set gain | `gain <N.N>` | `StorageController` | NVS write (float) |
+| List keys | `list` | `StorageController` | NVS key enumeration |
+| Reset | `clear` | `StorageController` | NVS namespace erase |
+| `--test-persist` | DTR reboot + `show` | `StorageController` | NVS survival across reboot |
+| OLED display | (all commands) | `DisplayController` | 128×32 live summary update |
+
+The dependency chain is:
+
+```
+test_config_store.py (Python host)
+  └─ ConfigStoreSerialClient (Python)
+       └─ pyserial / USB UART
+            └─ ConfigStore (ESP32 firmware service)
+                 ├─ StorageController  → NVS/Preferences persistence
+                 └─ DisplayController    → U8g2 OLED (128×32)
+```
+
 ---
 
 ## Camera Web Server (`CameraWebServerDemo`)
@@ -302,13 +476,15 @@ FreeRTOS producer-consumer: `camera_task` (Core 0) captures frames at ~20 fps an
 
 ## Python Dependencies
 
-| Test Script | Python Dependencies |
-|---|---|
-| `test_camera_ble.py` | `bleak>=0.22` (via `embedded_system_services` → `python-libs/`) |
-| `test_ble_api.py` | `bleak>=0.22` (via `embedded_system_services` → `python-libs/`) |
-| CameraWebServer | None (browser-based) |
+| Venv | Packages | Source |
+|---|---|---|
+| **Root workspace** (`/` or `firmware/`) | `platformio>=6.1`, `pyyaml`, `pip` | Root `pyproject.toml` `[dependency-groups] dev` |
+| **Host tests** (`test/host/`) | `bleak>=0.22`, `embedded-system-services` | `test/host/pyproject.toml` (pulls `embedded-system-services` from `python-libs/` workspace member) |
+| **CameraWebServer** | None (browser-based) | — |
 
-All host test dependencies are declared in `test/host/pyproject.toml`. Run `uv sync` from `test/host/` to install them. The `uv sync` at the repo root installs PlatformIO + pyyaml for firmware builds.
+- `uv sync` at the **repo root** installs PlatformIO + pyyaml + pip for firmware builds.
+- `uv sync` from **`test/host/`** installs `embedded-system-services` (via `python-libs/`) + `bleak` for host-side BLE test scripts.
+- `uv run` works from **any subdirectory** — uv walks up the tree to find the workspace root and uses the correct venv.
 
 ---
 
@@ -316,9 +492,11 @@ All host test dependencies are declared in `test/host/pyproject.toml`. Run `uv s
 
 | Error | Cause | Fix |
 |---|---|---|
+| `Multiple top-level packages discovered in a flat-layout` | Root `pyproject.toml` lacks explicit package config | Already fixed — `packages = []` set under `[tool.setuptools]` in root `pyproject.toml`. |
+| `MissingPackageManifestError: Could not find 'package.json'` | `tool-esptoolpy` post-install failed because `pip` was missing from uv venv | Already fixed — `pip` added to root dev dependencies. If you hit this, delete `~/.platformio/packages/tool-esptoolpy` and retry `uv run pio run --target upload`. |
 | `Device 'ESP32-CAM' not found` | Board not powered or BLE not advertising | Check USB connection. Press RST button. Ensure Bluetooth is ON on your laptop. |
 | `Device 'ESP32-API' not found` | Same as above | Same checks. Verify firmware environment matches your board (DevKitC-1 vs DORHEA). |
-| `No module named 'embedded_system_services'` | Dependencies not installed | Run `uv sync` from `test/host/`. |
+| `No module named 'embedded_system_services'` | Dependencies not installed | Run `uv sync` from repo root, or `uv sync` from `test/host/`. |
 | Snapshot is all black | Lens cap still on or lighting too dark | Remove lens cap. Use `--flash` for low light. |
 | `No frame available yet` | Camera still initializing | Wait a few seconds after boot. Camera takes 1-2 seconds to init. |
 | macOS Bluetooth permission popup | Terminal needs Bluetooth access | Grant permission: System Settings > Privacy & Security > Bluetooth. |

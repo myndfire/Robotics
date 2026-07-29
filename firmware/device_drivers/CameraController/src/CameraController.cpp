@@ -532,7 +532,8 @@ void CameraController::release(camera_fb_t* fb) {
 bool CameraController::setFrameSize(FrameSize size) {
     if (!_sensor) return false;
     _config.frame_size = (framesize_t)size;
-    return esp_camera_reconfigure(&_config) == ESP_OK;
+    esp_camera_deinit();
+    return esp_camera_init(&_config) == ESP_OK;
 }
 
 bool CameraController::setJpegQuality(uint8_t quality) {

@@ -17,6 +17,16 @@ Protocol:
         Notification 1: [4 bytes total_size LE] + first ≤240 bytes of JPEG
         Notifications 2+: ≤240 bytes each continuation data
         Client accumulates until total_size bytes received.
+
+Firmware Architecture (what this client exercises indirectly):
+    CameraBluetoothServer composes multiple device drivers internally:
+      - CameraController     — OV2640/OV3660 sensor, DMA, PSRAM, JPEG encode
+      - StorageController    — NVS/Preferences persistence (settings across reboots)
+      - LedRGBController     — Flash LED control
+
+    This Python client only sees the BLE GATT surface (CA01–CA05),
+    but operations like --save, --reset, and --flash exercise the
+    underlying drivers inside the ESP32 firmware.
 """
 
 import asyncio
@@ -251,8 +261,9 @@ class CameraBleClient:
     async def save_settings(self):
         """Persist current camera settings to NVS flash.
 
-        Sends "save" to the Control characteristic. Settings survive
-        power cycles after this call.
+        Sends "save" to the Control characteristic. The firmware's
+        StorageController writes settings to the NVS namespace
+        "camera_settings". Settings survive power cycles after this call.
         """
         await self._client.write_gatt_char(
             CONTROL_CHAR_UUID, b"save", response=True
@@ -307,9 +318,9 @@ class CameraBleClient:
     async def reset(self):
         """Factory reset — wipe all NVS and reboot the ESP32.
 
-        Sends "reset" to the Control characteristic. Destroys ALL NVS
-        namespaces including camera settings and WiFi credentials.
-        The ESP32 reboots automatically.
+        Sends "reset" to the Control characteristic. The firmware's
+        StorageController clears the entire NVS partition including
+        camera settings and WiFi credentials. The ESP32 reboots automatically.
         """
         await self._client.write_gatt_char(
             CONTROL_CHAR_UUID, b"reset", response=True

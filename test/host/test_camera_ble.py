@@ -55,6 +55,108 @@ chunked JPEG snapshots via the CA00 BLE service.
 
     Changing frame size triggers DMA pool reallocation (~50-200ms
     blocking).  All other settings apply instantly on next capture.
+
+── Call Stack (Host ↔ ESP32) ──────────────────────────────────────
+
+For each operation: Host Python method → BLE char → ESP32 callback →
+ESP32 handler. Useful for developers writing both host scripts and
+firmware.
+
+[1] Single Snapshot  (uv run python test_camera_ble.py)
+
+Host:
+  CameraBleClient.capture()
+    ├─ write_gatt_char(CA01, "snapshot")
+    ├─ _wait_for_frame()
+    │    ├─ _on_frame_notify() per CA03 chunk   # bleak callback
+    │    └─ _frame_event.wait()
+    └─ read_gatt_char(CA04) info JSON
+
+ESP32:
+  CtrlCB::onWrite(c)  [CA01, BLECharacteristicCallbacks]
+    └─ CameraBluetoothServer::_onControlWrite()
+         └─ _pendingSnapshot = true
+
+  _bleTask()  [Core 1]
+    └─ _sendFrameChunked()
+         ├─ _cam.capture() → esp_camera_fb_get()
+         └─ _frameChr->setValue(chunk) → notify()  [CA03]
+
+  _cameraTask()  [Core 0, ~20fps]
+    └─ _cam.capture() → esp_camera_fb_get()   [fills _frameQueue]
+
+
+[2] Update Settings  (--set quality=10)
+
+Host:
+  CameraBleClient.set_settings(quality=10)
+    └─ write_gatt_char(CA02, "quality=10")
+
+ESP32:
+  SetCB::onWrite(c)  [CA02, BLECharacteristicCallbacks]
+    └─ _onSettingsWrite(String input)
+         ├─ _parseSettingsString()
+         ├─ _cam.setJpegQuality() ... etc
+         └─ _settingsChr->setValue()
+
+
+[3] Persist Settings  (--save)
+
+Host:
+  CameraBleClient.save_settings()
+    └─ write_gatt_char(CA01, "save")
+
+ESP32:
+  CtrlCB::onWrite(c)  [CA01]
+    └─ _onControlWrite()
+         └─ _saveSettings()
+              ├─ _store.begin("cam_server")
+              ├─ _store.put<int>() / put<bool>() / etc
+              └─ _store.end()
+
+
+[4] Flash Photo  (--flash)
+
+Host:
+  CameraBleClient.flash_capture()
+    ├─ write_gatt_char(CA01, "flash_on")
+    ├─ capture()   [same flow as [1]]
+    └─ write_gatt_char(CA01, "flash_off")
+
+ESP32:
+  CtrlCB::onWrite(c)  [CA01]
+    ├─ "flash_on"  → _onControlWrite()
+    │    ├─ _cam.flashOn()
+    │    └─ _cam.setAecMode(false)
+    └─ "flash_off" → _onControlWrite()
+         ├─ _cam.flashOff()
+         └─ _cam.setAecMode(true)
+
+
+[5] Factory Reset  (--reset)
+
+Host:
+  CameraBleClient.reset()
+    └─ write_gatt_char(CA01, "reset")
+
+ESP32:
+  CtrlCB::onWrite(c)  [CA01]
+    └─ _onControlWrite()
+         ├─ _store.clear()
+         └─ esp_restart()
+
+
+── BLE Characteristic Map ──
+
+  CA01  0000CA01-...  Write   Control   → CtrlCB::onWrite()
+  CA02  0000CA02-...  Write   Settings  → SetCB::onWrite()
+  CA03  0000CA03-...  Notify  Frame     → _on_frame_notify()  [host]
+  CA04  0000CA04-...  Read    Info      → read_gatt_char()
+  CA05  0000CA05-...  Read    Params    → read_gatt_char()
+
+Note: The ESP32 Arduino-ESP32 BLE library wraps NimBLE. Your C++ code
+only sees the BLECharacteristicCallbacks interface; NimBLE handles the
+underlying ATT protocol and radio.
 """
 
 import asyncio

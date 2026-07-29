@@ -6,6 +6,7 @@
  */
 
 #include "CameraBluetoothServer.h"
+#include <BLE2902.h>
 
 // ── BLE Service & Characteristic UUIDs ─────────────────────────────────
 
@@ -199,17 +200,23 @@ void CameraBluetoothServer::_setupBLE() {
         public:
             SetCB(CameraBluetoothServer* srv) : _srv(srv) {}
             void onWrite(BLECharacteristic* c) override {
-                _srv->_onSettingsWrite(c->getValue());
+                _srv->_onSettingsWrite(String(c->getValue().c_str()));
             }
             void onRead(BLECharacteristic* c) override  { (void)c; _srv->_onSettingsRead(); }
         };
         _settingsChr->setCallbacks(new SetCB(this));
     }
-    _settingsChr->setValue(_buildSettingsString());
+    _settingsChr->setValue(std::string(_buildSettingsString().c_str()));
 
-    // CA03 — Frame Data (notify). NimBLE auto-adds BLE2902 CCCD.
+    // CA03 — Frame Data (notify). Explicitly add BLE2902 CCCD descriptor
+    // (UUID 0x2902) so clients can subscribe to notifications. Required by:
+    //   - macOS/iOS CoreBluetooth
+    //   - Web Bluetooth API (Chrome/Edge in browser)
+    //   - Android BLE
+    // The Arduino-ESP32 BLE library does NOT auto-add this descriptor.
     _frameChr = _cameraService->createCharacteristic(
         FRAME_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+    _frameChr->addDescriptor(new BLE2902());
 
     // CA04 — Frame Info (read)
     _infoChr = _cameraService->createCharacteristic(
@@ -219,7 +226,7 @@ void CameraBluetoothServer::_setupBLE() {
     // CA05 — Params schema (read-only, driver-owned)
     _paramsChr = _cameraService->createCharacteristic(
         PARAMS_CHAR_UUID, BLECharacteristic::PROPERTY_READ);
-    _paramsChr->setValue(_buildParamsJson());
+    _paramsChr->setValue(std::string(_buildParamsJson().c_str()));
 
     _cameraService->start();
 
@@ -229,7 +236,7 @@ void CameraBluetoothServer::_setupBLE() {
 // ── BLE callbacks ──────────────────────────────────────────────────────
 
 void CameraBluetoothServer::_onControlWrite() {
-    String cmd = _controlChr->getValue();
+    String cmd = String(_controlChr->getValue().c_str());
     cmd.trim();
     cmd.toLowerCase();
 
@@ -297,7 +304,7 @@ void CameraBluetoothServer::_onControlWrite() {
             _cam.setFrameSize(_frameSize);
         }
 
-        _settingsChr->setValue(_buildSettingsString());
+    _settingsChr->setValue(std::string(_buildSettingsString().c_str()));
         Serial.println("BLE: settings reset to factory defaults");
 
         // Clear NVS so reboot doesn't reload old saved settings
@@ -355,7 +362,7 @@ void CameraBluetoothServer::_onSettingsWrite(const String& input) {
         _cam.setAgcGain(_gain);
     }
 
-    _settingsChr->setValue(_buildSettingsString());
+    _settingsChr->setValue(std::string(_buildSettingsString().c_str()));
     Serial.printf("BLE: settings updated -> %s\n", _buildSettingsString().c_str());
 
     // Discard stale frame from queue (camera_task will refill,
@@ -373,7 +380,7 @@ void CameraBluetoothServer::_onSettingsWrite(const String& input) {
 }
 
 void CameraBluetoothServer::_onSettingsRead() {
-    _settingsChr->setValue(_buildSettingsString());
+    _settingsChr->setValue(std::string(_buildSettingsString().c_str()));
 }
 
 // ── Frame delivery ─────────────────────────────────────────────────────

@@ -22,8 +22,21 @@ wheels = [
 [[package]]
 name = "agent-harness"
 version = "0.1.0"
-source = { git = "https://github.com/myndfire/pydanticai-fluent.git?subdirectory=agent_harness#5d1fa1ffea9d0fb4858bde7c74de0f53daaa61d6" }
+source = { editable = "../../pydanticai-fluent/agent_harness" }
 dependencies = [
+    { name = "aio-pika" },
+    { name = "jinja2" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
+    { name = "pydantic-ai" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
     { name = "aio-pika" },
     { name = "jinja2" },
     { name = "opentelemetry-api" },
@@ -185,7 +198,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-harness", git = "https://github.com/myndfire/pydanticai-fluent.git?subdirectory=agent_harness" },
+    { name = "agent-harness", editable = "../../pydanticai-fluent/agent_harness" },
     { name = "embedded-system-services", git = "https://github.com/myndfire/Robotics.git?subdirectory=python-libs" },
     { name = "opentelemetry-api", specifier = ">=1.27,<1.30" },
 ]

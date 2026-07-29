@@ -8,6 +8,16 @@ Protocol:
     Service UUID:     0000BA00-0000-1000-8000-00805F9B34FB
     Control (BA01):   Write   — key=val command pairs
     Status (BA02):    Read    — full state string (led=R,G,B,pin4=1,pin7=0,...)
+
+Firmware Architecture (what this client exercises indirectly):
+    BleApiServer composes multiple device drivers internally:
+      - GpioController       — Digital/analog GPIO read/write
+      - LedRGBController     — NeoPixel LED colour control
+      - StorageController    — NVS persistence (pin configs + LED state across reboots)
+
+    This Python client only sees the BLE GATT surface (BA01–BA02),
+    but --set, --config, and --led operations exercise the underlying
+    drivers inside the ESP32 firmware.
 """
 
 import asyncio
