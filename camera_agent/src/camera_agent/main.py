@@ -11,8 +11,17 @@ Prerequisites:
 """
 
 import asyncio
+from dotenv import load_dotenv
+
+load_dotenv()  # read .env into os.environ before any module imports env vars
+
 from camera_agent.agent_factory import create_agent
 from agent_harness.memory import MessageHistory
+
+
+def _print_response(text: str) -> None:
+    """Print agent response in bright cyan to distinguish it from logs."""
+    print(f"\033[96m{text}\033[0m")
 
 
 async def main():
@@ -35,7 +44,7 @@ async def main():
 
         try:
             result = await agent.run(prompt, MessageHistory(), "camera-session")
-            print(result.output)
+            _print_response(result.output)
         except Exception as e:
             print(f"Error: {e}")
 

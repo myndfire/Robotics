@@ -157,8 +157,8 @@ This matters: an earlier version let the main model summarise the description in
 | `CAMERA_AGENT_MODEL` | `gpt-oss:20b` | Main model, used for conversation and tool calling. |
 | `CAMERA_AGENT_VISION_MODEL` | `llava` | Vision model used by `describe_picture`. Always served by Ollama. |
 | `CAMERA_AGENT_DEVICE` | `ESP32-CAM` | BLE device name to scan for. Change if your board advertises differently. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint. A trailing `/v1` is stripped for the vision call. |
-| `CAMERA_AGENT_DEBUG` | `0` | Set to `1` to print every LLM tool-call decision and tool execution trace. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint. |
+| `CAMERA_AGENT_DEBUG` | `0` | Set to `1` to print tool execution trace (arguments, duration, result). |
 
 ## Debug mode
 

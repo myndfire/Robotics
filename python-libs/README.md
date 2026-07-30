@@ -18,7 +18,7 @@ uv pip install -e .
 ## Usage
 
 ```python
-from embedded_system_services import CameraBleClient, BleApiClient
+from embedded_system_services import CameraBleClient, BleApiClient, ConfigStoreSerialClient
 import asyncio
 
 async def main():
@@ -40,6 +40,21 @@ asyncio.run(main())
 ```
 
 ## Modules
+
+### `embedded_system_services.serial_client`
+
+Serial-over-USB UART client for the **ConfigStore** firmware service. Communicates with ESP32-S3 over USB-C at 921600 baud.
+
+| Method | Description |
+|---|---|
+| `connect(port=None, baud=921600)` | Auto-detect or explicit port. |
+| `send_command(cmd)` | Send command, read response. |
+| `get_config()` | Read current config from device. |
+| `set_config(**kwargs)` | Update config values. |
+| `reset()` | Factory reset. |
+| `test_persist()` | Reboot and verify persistence. |
+
+See `../test/host/test_config_store.py` for usage examples.
 
 ### `embedded_system_services.camera_ble`
 

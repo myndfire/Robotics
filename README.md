@@ -41,12 +41,21 @@ Robotics/
 ├── python-libs/                           ← Host-side Python client library
 │   └── embedded_system_services/
 │       ├── camera_ble/                    ← CameraBleClient
-│       └── ble_api/                       ← BleApiClient
-└── test/
-    └── host/                              ← Host-side test scripts
-        ├── README.md
-        ├── test_camera_ble.py
-        └── test_ble_api.py
+│       ├── ble_api/                       ← BleApiClient
+│       └── serial_client/               ← ConfigStoreSerialClient (USB UART)
+├── test/
+│   └── host/                              ← Host-side test scripts
+│       ├── README.md
+│       ├── test_camera_ble.py
+│       ├── test_ble_api.py
+│       └── test_config_store.py
+└── camera_agent/                          ← Natural language camera control agent
+    ├── README.md
+    └── src/camera_agent/
+        ├── main.py
+        ├── agent_factory.py
+        ├── tools.py
+        └── vision.py
 ```
 
 ## Tiers
