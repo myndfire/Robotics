@@ -8,11 +8,9 @@ Services are **NOT flashable** — they have no `main.cpp` or `platformio.ini`. 
 
 | Service | Composes | Description |
 |---|---|---|
-| [BleApiServer](BleApiServer/) | BLE stack, LedRGBController, StorageController | BLE peripheral for GPIO control and NeoPixel LED. Full pin registry with NVS persistence. Advertises as ESP32-API. |
 | [CameraWebServer](CameraWebServer/) | CameraController, WiFiManager, WebServer | WiFi-connected MJPEG camera web server with captive portal. Dark-theme dashboard, snapshot, and live streaming. |
 | [MoistureMonitor](MoistureMonitor/) | MoistureSensorController, DisplayController, StorageController | Soil moisture monitoring with DRY/WET/OK status. FreeRTOS sensor + display tasks, NVS-persisted calibration. |
 | [TimedCycleController](TimedCycleController/) | RelayController, DisplayController, StorageController | Duty-cycle pump/solenoid controller. Configurable ON/OFF durations persisted to NVS, live OLED countdowns. |
-| [ConfigStore](ConfigStore/) | StorageController, DisplayController | Typed NVS configuration manager (String, int, bool, float). Serial command interface with OLED live summary. |
 | [StatusDashboard](StatusDashboard/) | DisplayController, WiFi | Multi-task system telemetry dashboard with scrolling OLED. Uptime, heap, PSRAM, WiFi RSSI, SDK version. |
 
 ## Architecture
@@ -46,12 +44,9 @@ lib_extra_dirs =
 
 ## Host Services
 
-BleApiServer communicates with the host-side Python client library:
-
 | Firmware Service | Python Client | Module |
 |---|---|---|
-| BleApiServer | BleApiClient | `from embedded_system_services.ble_api import BleApiClient` |
-| CameraBluetoothServer (in `device_drivers/`) | CameraBleClient | `from embedded_system_services.camera_ble import CameraBleClient` |
+| ApiBLE | ApiBleClient | `from embedded_system_services.api_ble import ApiBleClient` |
 
 Install: `pip install -e ./python-libs`. See `test/host/` for usage examples.
 

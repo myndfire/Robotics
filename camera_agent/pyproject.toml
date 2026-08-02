@@ -20,4 +20,4 @@ where = ["src"]
 # to the git source once it lands upstream:
 #   agent-harness = { git = "https://github.com/myndfire/pydanticai-fluent.git", subdirectory = "agent_harness" }
 agent-harness = { path = "../../pydanticai-fluent/agent_harness", editable = true }
-embedded-system-services = { git = "https://github.com/myndfire/Robotics.git", subdirectory = "python-libs" }
+embedded-system-services = { path = "../python-libs" }

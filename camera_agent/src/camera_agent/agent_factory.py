@@ -26,10 +26,12 @@ def create_agent() -> ManagedAgent:
     """
     provider = os.getenv("CAMERA_AGENT_PROVIDER", "ollama")
     model = os.getenv("CAMERA_AGENT_MODEL", "gpt-oss:20b")
+    temperature = float(os.getenv("CAMERA_AGENT_TEMPERATURE", "0"))
 
     return (
         ManagedAgent()
         .with_model(ModelConfig(provider=provider, model_name=model))
+        .with_model_settings({"temperature": temperature})
         .with_tools(ToolRegistry().add_many(take_picture, describe_picture))
         .with_prompts(StaticPrompts(
             "You are a camera assistant for an ESP32-S3 BLE camera.\n"

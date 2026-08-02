@@ -7,8 +7,7 @@ Low-level PlatformIO driver libraries for the ESP32-S3. Each folder is a self-co
 | Library | Description | External Dependencies | Internal Dependencies |
 |---|---|---|---|
 | [AdcController](AdcController/) | ESP32-S3 ADC wrapper — configurable resolution, attenuation, e-fuse calibrated mV, multi-sample averaging | — (Arduino only) | — |
-| [CameraBluetoothServer](CameraBluetoothServer/) | BLE camera server — serves JPEG snapshots over BLE with chunked transfer, settings persistence, FreeRTOS pipeline | Arduino BLE stack, FreeRTOS | CameraController, StorageController |
-| [CameraController](CameraController/) | esp_camera wrapper — 6 board presets, all sensor settings, frame capture with release/acquire, flash LED control | `esp_camera` (bundled) | — |
+| [CameraController](CameraController/) | OV2640/OV3660 camera sensor driver — 7 board presets, all sensor settings, frame capture with release/acquire, flash LED control | Arduino-ESP32 `esp_camera` (bundled) | None |
 | [DisplayController](DisplayController/) | SSD1306 OLED wrapper — thread-safe, queue-based, multi-producer 4/8-line display with per-line scrolling and fonts | U8g2 (`olikraus/U8g2`), FreeRTOS | — |
 | [LedRGBController](LedRGBController/) | WS2812/SK6812 NeoPixel driver — named colors, HSV, application-level semantics | Adafruit NeoPixel (`adafruit/Adafruit NeoPixel`) | — |
 | [MoistureSensorController](MoistureSensorController/) | LM393 soil moisture sensor — two-point NVS-persisted calibration, hysteresis thresholds, mutex-protected setters | FreeRTOS | StorageController |
@@ -18,8 +17,7 @@ Low-level PlatformIO driver libraries for the ESP32-S3. Each folder is a self-co
 ## Inter-Library Dependency Graph
 
 ```
-CameraBluetoothServer ──── depends on ──── CameraController
-                        ──── depends on ──── StorageController
+CameraController ──── used by ──── ApiBLE (app), CameraWebServer (service)
 
 MoistureSensorController ── depends on ──── StorageController
 
@@ -38,9 +36,7 @@ Drivers are composed into reusable firmware services in [../services/](../servic
 |---|---|
 | MoistureMonitor | MoistureSensorController + DisplayController + StorageController |
 | TimedCycleController | RelayController + DisplayController + StorageController |
-| ConfigStore | StorageController + DisplayController |
 | CameraWebServer | CameraController + WiFiManager + WebServer |
-| BleApiServer | BLE stack + Adafruit NeoPixel |
 | StatusDashboard | DisplayController + WiFi |
 
 ## Including in Your Project

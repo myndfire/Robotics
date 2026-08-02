@@ -1,85 +1,142 @@
 # Camera Agent
 
-A managed AI agent that controls an ESP32-S3 BLE camera using natural language. When you ask it to take a picture, the LLM calls the `take_picture` tool, which connects to the ESP32-CAM over BLE and captures a JPEG snapshot. Ask it to describe the photo and it calls `describe_picture`, which hands the JPEG to a local vision model.
+A managed AI agent that controls an ESP32-S3 BLE camera using natural language. It uses two models: a text model for conversation and a vision model for image understanding.
 
 ## Architecture
 
-Two models are used, because the model that is good at conversation and tool calling is not the model that can see:
+### Two-Model Design
+
+The agent uses two specialized models because the model that is good at conversation is not the model that can see images:
 
 ```
-User: "take a picture and then describe it"
+User: "take a picture and describe it"
    │
    ▼
-gpt-oss:20b  (CAMERA_AGENT_MODEL)
-   ManagedAgent() → .with_model(ModelConfig(...))
-   │
-   ├── take_picture()      ──BLE──►  ESP32-CAM       ──►  snapshot.jpg
-   │                                                       (returns path + byte size)
-   │
-   └── describe_picture("snapshot.jpg")
-            │
-            └── llava  (CAMERA_AGENT_VISION_MODEL)
-                ManagedAgent() → .run([text, ImageUrl], ...)
-                via Ollama /v1/chat/completions
-                │
-                └──►  description text
+┌─────────────────────────────────────────────────┐
+│  Main Agent (CAMERA_AGENT_MODEL)                │
+│  Default: gpt-oss:20b via Ollama                │
+│  • Conversational reasoning                       │
+│  • Tool calling (take_picture, describe_picture) │
+│  • Answers user questions                        │
+└──────────────────┬──────────────────────────────┘
+                   │
+       ┌───────────┴───────────┐
+       │                       │
+       ▼                       ▼
+┌──────────────┐      ┌──────────────┐
+│ take_picture │      │describe_picture│
+│  (BLE tool)  │      │  (Vision tool) │
+└──────┬───────┘      └──────┬───────┘
+       │                      │
+       ▼                      ▼
+  ApiBLE               llava
+  (BLE device)          (Vision model)
+       │                      │
+       ▼                      ▼
+  snapshot.jpg          Description
+  (4-6KB JPEG)          (Text from llava)
 ```
 
-Both the main agent and the vision agent are built with the same `ManagedAgent` / `ModelConfig` / `build_model()` factory pattern from `agent_harness`. The only difference is the prompt type: the main agent gets a plain string, the vision agent gets a multimodal list (`[str, ImageUrl]`). The main model never receives image pixels, so it is instructed to relay `describe_picture`'s output verbatim rather than describe anything itself.
+### Request Flow
+
+1. **User speaks** → Main agent (text model) interprets intent
+2. **Tool selection** → Agent decides which tool(s) to call
+3. **Tool execution**:
+   - `take_picture`: Connects via BLE, captures JPEG, saves to disk
+   - `describe_picture`: Reads JPEG, sends to vision model, returns description
+4. **Response generation** → Main agent answers using tool results
+
+### Code Structure
+
+```
+camera_agent/
+├── src/camera_agent/
+│   ├── main.py              # CLI entry point, loads .env
+│   ├── agent_factory.py     # Creates ManagedAgent with tools + system prompt
+│   ├── tools/               # Tools exposed to the agent
+│   │   ├── __init__.py      # Re-exports take_picture, describe_picture
+│   │   ├── _debug.py        # Shared logging decorator (CAMERA_AGENT_DEBUG)
+│   │   ├── capture.py       # take_picture: BLE camera capture
+│   │   └── describe.py      # describe_picture: Vision model delegation
+│   └── vision.py            # Vision agent: ManagedAgent + ImageUrl
+├── .env                     # Environment variables
+├── pyproject.toml           # Dependencies (agent-harness, embedded-system-services)
+└── README.md
+```
 
 ## Prerequisites
 
-- **ESP32-S3 CAM** board running the **CameraBLE** firmware
-- **Bluetooth** enabled on your laptop
-- **Python 3.11+** with [uv](https://docs.astral.sh/uv/)
-- An **LLM** (Ollama local, or any [supported provider](https://github.com/myndfire/pydanticai-fluent/blob/master/USAGE.md#supported-providers))
+| Component | Requirement |
+|---|---|
+| **Hardware** | ESP32-S3 CAM board with OV2640/OV3660 camera |
+| **Firmware** | ApiBLE firmware flashed on ESP32-S3 |
+| **Host OS** | macOS, Linux, or Windows with Bluetooth |
+| **Python** | 3.11+ with [uv](https://docs.astral.sh/uv/) |
+| **LLM** | Ollama running locally (for both text and vision models) |
 
 ## Setup
 
-### 1. Flash the CameraBLE firmware
+### 1. Flash the ApiBLE Firmware
 
 ```bash
-git clone https://github.com/myndfire/Robotics.git
-cd Robotics/firmware/apps/CameraBLE
+cd /path/to/Robotics/firmware/apps/ApiBLE
 uv run pio run --target upload
 ```
 
-The ESP32 will advertise as `ESP32-CAM` over BLE after boot.
+The ESP32 will advertise as `ApiBLE` over BLE after boot. Verify by checking the serial monitor:
+```bash
+uv run pio run --target monitor
+# You should see: "Advertising as ApiBLE"
+```
 
-### 2. Configure the LLM
+### 2. Install Ollama and Pull Models
 
 ```bash
+# Install Ollama (macOS)
+brew install ollama
+
+# Start Ollama
+ollama serve
+
+# Pull models (in another terminal)
+ollama pull gpt-oss:20b    # Main conversation model
+ollama pull llava          # Vision model for image description
+```
+
+### 3. Configure Environment
+
+```bash
+cd /path/to/Robotics/camera_agent
 cp .env.example .env
 ```
 
-Edit `.env` — set your LLM provider and model. Defaults to `ollama:gpt-oss:20b`. For OpenAI:
-
+Edit `.env`:
 ```bash
-CAMERA_AGENT_PROVIDER=openai
-CAMERA_AGENT_MODEL=gpt-4o
-export OPENAI_API_KEY=sk-...
+# LLM configuration
+CAMERA_AGENT_PROVIDER=ollama
+CAMERA_AGENT_MODEL=gpt-oss:20b
+
+# Vision model (always via Ollama)
+CAMERA_AGENT_VISION_MODEL=llava
+
+# BLE device name (must match firmware)
+CAMERA_AGENT_DEVICE=ApiBLE
+
+# Debug mode (set to 1 to see tool execution)
+CAMERA_AGENT_DEBUG=0
 ```
 
-### 3. Pull the vision model
-
-Image description is served by Ollama regardless of which provider runs the main
-model, so Ollama must be running and the vision model must be present:
-
-```bash
-ollama pull llava
-```
-
-### 4. Install dependencies
+### 4. Install Dependencies
 
 ```bash
 uv sync
 ```
 
-This clones and installs both dependencies from GitHub:
-- `agent-harness` — the managed agent framework
-- `embedded-system-services` — the BLE camera client library
+This installs:
+- `agent-harness` — managed agent framework (from GitHub)
+- `embedded-system-services` — BLE client library (from local workspace)
 
-### 5. Run the agent
+### 5. Run the Agent
 
 ```bash
 uv run python -m camera_agent.main
@@ -87,97 +144,172 @@ uv run python -m camera_agent.main
 
 ## Usage
 
+### Basic Commands
+
 ```
-> Take a picture
-Photo saved to snapshot.jpg (4521 bytes)
+> take a photo
+Photo saved to snapshot.jpg (5619 bytes)
 
-> Take a photo and save it as kitchen.jpg
-Photo saved to kitchen.jpg (4490 bytes)
+> take a picture and describe it
+The image shows an interior space with a patterned carpet...
 
-> Take a picture and then describe it
-The image shows an interior space that appears to be a room with minimal
-furnishings... There are window blinds partially closed, allowing natural
-light to enter the room.
-
-> What colour are the walls in snapshot.jpg?
-The image is too blurry to discern specific details, including the color of
-the walls.
+> what color are the walls?
+The walls appear to be white or off-white.
 
 > exit
 ```
 
-The agent understands natural language — you can phrase the request however you want. Any prompt that asks for a photo triggers `take_picture`; any prompt asking about image content triggers `describe_picture`. A specific question is passed through to the vision model rather than answered from the description.
+### Prompt Patterns
 
-Asking about a file that already exists does **not** re-capture. This is deliberate: `take_picture` overwrites its target, so retaking on a question would destroy the image being asked about. The system prompt forbids it.
+| User Intent | Example Prompt | Tools Called |
+|---|---|---|
+| Capture only | "take a photo" | `take_picture` |
+| Describe only | "describe snapshot.jpg" | `describe_picture` |
+| Capture + Describe | "take a picture and describe it" | `take_picture` → `describe_picture` |
+| Question about image | "is there a carpet?" | `describe_picture` |
+| Conditional | "if you see a cat, say meow" | `take_picture` → `describe_picture` → reasoning |
 
-Note the second answer above — a refusal rather than a guess. That is the correct outcome, and preferable to the confident fiction a text-only model produces.
+## Configuration
 
-## Limitations
+| Variable | Default | Description |
+|---|---|---|
+| `CAMERA_AGENT_PROVIDER` | `ollama` | LLM provider (ollama, openai, anthropic, etc.) |
+| `CAMERA_AGENT_MODEL` | `gpt-oss:20b` | Main model for conversation and tool calling |
+| `CAMERA_AGENT_VISION_MODEL` | `llava` | Vision model for image description (always Ollama) |
+| `CAMERA_AGENT_DEVICE` | `ApiBLE` | BLE device name to scan for |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `CAMERA_AGENT_DEBUG` | `0` | Enable tool execution logging (1/true/yes) |
 
-### Descriptions are only as good as the vision model
+## Debug Mode
 
-`llava` is a small local model reading a 320x240 JPEG from a low-cost sensor. It reliably reports scene-level facts — indoor/outdoor, wall colour, lighting, blinds, whether a space looks occupied — but it misidentifies small objects, and it will label a dark shape on the floor a "portable stove" with the same confidence it describes a wall. Treat object-level claims as guesses.
+Set `CAMERA_AGENT_DEBUG=1` in `.env` to see tool execution:
 
-Raising quality is mostly a firmware-side problem, not a prompt problem: increase frame size and JPEG quality in the CameraBLE config so the vision model has more pixels to work with.
+```
+> take a photo
+🔧  [take_picture] start  args={'output_path': 'snapshot.jpg'}
+Scanning for 'ApiBLE'...
+Found: ApiBLE
+Connected: True
+Frame saved: snapshot.jpg (5619 bytes)
+🔧  [take_picture] end  success=True  duration=2.341s
+Photo saved to snapshot.jpg (5619 bytes)
+```
 
-### The main model still can't see
-
-`take_picture` returns only a path and byte size, and `describe_picture` returns text. Neither puts pixels into the main model's context. The system prompt therefore instructs the main model to relay `describe_picture` output verbatim.
-
-This matters: an earlier version let the main model summarise the description in its own words, and `gpt-oss:20b` inverted "bright light source" into "dark indoor space", invented a floor colour that `llava` had explicitly called not visible, and turned one uncertain door into two. If you edit the prompt in `src/camera_agent/agent_factory.py`, keep the verbatim instruction, and keep the prompt short — a long multi-rule prompt made the 20B model emit raw tool-call JSON as its answer instead of calling the tool.
-
-### Swapping the main model does not change the vision path
-
-`describe_picture` always routes through Ollama (via `ManagedAgent` + `ModelConfig` + `build_model()`). Setting `CAMERA_AGENT_PROVIDER=openai` changes the conversational model only; description still runs through `CAMERA_AGENT_VISION_MODEL` on local Ollama. Vision model options:
-
-| Model | Notes |
-|---|---|
-| `llava` | Default. 4.7GB, local, no API key. |
-| `llava-phi3` | Smaller and faster, weaker descriptions. |
+**Useful for:**
+- Confirming the LLM actually calls tools (not just talks about them)
+- Seeing what arguments the LLM passes
+- Measuring BLE capture vs vision inference latency
+- Diagnosing why a tool was skipped or failed
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Agent describes objects that are not in the photo | Small vision model misidentifying detail in a low-res frame. | Expected for object-level claims. Raise frame size/quality in the CameraBLE firmware. |
-| Agent's description contradicts the image, e.g. calls a bright room dark | Main model paraphrasing instead of relaying `describe_picture` verbatim. | Restore the verbatim instruction in the system prompt in `src/camera_agent/agent_factory.py`. |
-| Agent prints raw JSON such as `{"output_path":"snapshot.jpg"}` and never calls the tool | System prompt too long/complex for the main model, so it emits a tool call as text. | Shorten the system prompt. |
-| Asking a question about an image silently replaces it with a new capture | Main model calling `take_picture` before `describe_picture` on a describe-only request. | Restore the "never call take_picture in this case" line in the system prompt. |
-| `Vision model 'llava' failed: All 3 retries exhausted. Last error: Connection error.` | Ollama not running, or listening elsewhere. | Start Ollama, or set `OLLAMA_BASE_URL`. |
-| `Vision model 'llava' returned 404. Confirm the model is installed...` | Vision model not pulled. | `ollama pull llava` |
-| `Scanning for 'ESP32-CAM' ...` then timeout | Board not powered, not flashed, or advertising under a different name. | Confirm the CameraBLE firmware is running; check the serial log for the advertised name and set `CAMERA_AGENT_DEVICE` to match. |
-| Connects but capture hangs or truncates | Frame notifications are not subscribed, usually a missing CCCD on the frame characteristic. | Verify `BLE2902` is attached to the frame characteristic in `CameraBluetoothServer.cpp`. |
-| macOS pairs to the wrong device | Multiple boards advertising the same name. | Set `CAMERA_AGENT_DEVICE` to a unique name and reflash. |
+| `Device 'ApiBLE' not found` | Board not powered / not advertising | Check USB, press RST, verify firmware flashed |
+| `Vision model 'llava' returned 404` | llava not pulled | `ollama pull llava` |
+| `Could not reach Ollama` | Ollama not running | Start `ollama serve` |
+| Agent describes things not in photo | Main model hallucinating | Check `describe_picture` output in debug mode; vision model sees pixels, main model only sees text |
+| Agent takes 2+ photos for 1 request | Main model misunderstanding | System prompt says "exactly once"; shorten prompt if too complex |
+| Agent outputs raw JSON instead of calling tool | System prompt too long for model | Keep prompt concise (under 100 words for gpt-oss:20b) |
+| Description seems wrong | Vision model misidentifying | Expected for small objects in 320x240 frames; increase camera quality in firmware |
+| Board connects but no image received | Missing BLE2902 descriptor | Verify CCCD on CA03 characteristic in firmware |
 
-## Configuration
+## Architecture Details
 
-| Env Variable | Default | Description |
-|---|---|---|
-| `CAMERA_AGENT_PROVIDER` | `ollama` | LLM provider. See supported providers in the pydanticai-fluent USAGE.md. |
-| `CAMERA_AGENT_MODEL` | `gpt-oss:20b` | Main model, used for conversation and tool calling. |
-| `CAMERA_AGENT_VISION_MODEL` | `llava` | Vision model used by `describe_picture`. Always served by Ollama. |
-| `CAMERA_AGENT_DEVICE` | `ESP32-CAM` | BLE device name to scan for. Change if your board advertises differently. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint. |
-| `CAMERA_AGENT_DEBUG` | `0` | Set to `1` to print tool execution trace (arguments, duration, result). |
+### Why Two Models?
 
-## Debug mode
+| Model | Role | Input | Output | Size |
+|---|---|---|---|---|
+| **gpt-oss:20b** | Conversation, tool calling | Text prompt | Tool calls + text answer | ~13GB |
+| **llava** | Image understanding | JPEG pixels | Text description | ~4.7GB |
 
-Set `CAMERA_AGENT_DEBUG=1` to see exactly what each tool does:
+A single model cannot do both well. gpt-oss:20b is text-only (would hallucinate descriptions). llava is vision-only (weak at tool calling and conversation).
+
+### Data Flow
 
 ```
-> take a picture and describe it
-🔧  [take_picture] start  args={'output_path': 'snapshot.jpg'}
-Scanning for 'ESP32-CAM' ...
-Found: ESP32-CAM
-Connected: True
-Frame saved: snapshot.jpg (4963 bytes)
-🔧  [take_picture] end  success=True  duration=2.341s
-🔧  [describe_picture] start  args={'image_path': 'snapshot.jpg', 'question': ''}
-🔧  [describe_picture] end  success=True  duration=7.192s
-The image shows a room with a sloped white ceiling...
+User Text
+    │
+    ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Main Agent  │────→│ take_picture│────→│ ApiBLE     │
+│ (gpt-oss)   │     │ (BLE tool)  │     │ (Hardware)  │
+└─────────────┘     └─────────────┘     └──────┬──────┘
+    │                                            │
+    │         ┌──────────────────────────────────┘
+    │         │
+    │    snapshot.jpg (JPEG)
+    │         │
+    │    ┌────┴────┐
+    └───→│ describe│────→ llava (vision model)
+         │ _picture│         └──→ Text description
+         └────┬────┘
+              │
+    ┌─────────┘
+    ▼
+User Answer (text, based on description)
 ```
 
-This is useful for:
-- Seeing what arguments the LLM passes to each tool
-- Measuring how long BLE capture vs vision inference take
-- Diagnosing why a tool was skipped or failed
+### Tool Design
+
+**`take_picture` (capture.py):**
+- No vision capability — only moves bytes from ESP32 to disk
+- Returns: `"Photo saved to {path} ({size} bytes)"`
+- Overwrites existing file (by design)
+
+**`describe_picture` (describe.py):**
+- No BLE capability — only reads file and calls vision model
+- Returns: Description text or error message
+- Vision model is a separate `ManagedAgent` using `ImageUrl` prompt
+
+**Separation of concerns:** Each tool does one thing. The LLM composes them.
+
+## Development
+
+### Adding a New Tool
+
+1. Create handler in `src/camera_agent/tools/`:
+```python
+# tools/my_tool.py
+from camera_agent.tools._debug import log_tool_call
+
+@log_tool_call
+async def my_tool(param: str) -> str:
+    return f"Result: {param}"
+```
+
+2. Export in `src/camera_agent/tools/__init__.py`:
+```python
+from camera_agent.tools.my_tool import my_tool
+__all__ = ["take_picture", "describe_picture", "my_tool", "log_tool_call"]
+```
+
+3. Register in `src/camera_agent/agent_factory.py`:
+```python
+from camera_agent.tools import my_tool
+# ...
+.with_tools(ToolRegistry().add_many(take_picture, describe_picture, my_tool))
+```
+
+### Testing Without Hardware
+
+You can test the vision pipeline without the ESP32:
+```python
+from camera_agent.vision import describe_image
+
+with open("existing_photo.jpg", "rb") as f:
+    result = await describe_image(f.read(), "What do you see?")
+    print(result.description)
+```
+
+## Related Projects
+
+| Project | Relationship |
+|---|---|
+| [pydanticai-fluent](https://github.com/myndfire/pydanticai-fluent) | Agent framework (`agent-harness`) |
+| [Robotics/firmware](https://github.com/myndfire/Robotics) | ESP32-S3 firmware (ApiBLE, device drivers) |
+| [Robotics/python-libs](https://github.com/myndfire/Robotics/tree/main/python-libs) | BLE client library (`embedded-system-services`) |
+
+## License
+
+Apache 2.0 — See [LICENSE](../LICENSE)

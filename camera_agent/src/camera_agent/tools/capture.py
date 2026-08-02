@@ -1,12 +1,12 @@
 """BLE camera capture tool — ``take_picture``.
 
-Wraps :class:`embedded_system_services.camera_ble.CameraBleClient` with a
+Wraps :class:`embedded_system_services.api_ble.ApiBleClient` with a
 clean async interface and the shared ``@log_tool_call`` decorator.
 """
 
 import os
 
-from embedded_system_services.camera_ble import CameraBleClient
+from embedded_system_services.api_ble import ApiBleClient
 
 from camera_agent.tools._debug import log_tool_call
 
@@ -15,8 +15,8 @@ from camera_agent.tools._debug import log_tool_call
 async def take_picture(output_path: str = "snapshot.jpg") -> str:
     """Take a photo using the ESP32-S3 BLE camera.
 
-    Connects to the ESP32-S3 running CameraBluetoothServer firmware
-    (advertises as ESP32-CAM), captures a single JPEG snapshot, and
+    Connects to the ESP32-S3 running ApiBLE firmware
+    (advertises as ApiBLE), captures a single JPEG snapshot, and
     saves it to disk.
 
     This tool does NOT describe the photo. To describe it, call
@@ -29,9 +29,9 @@ async def take_picture(output_path: str = "snapshot.jpg") -> str:
         str: Confirmation message with file path and size in bytes.
              Example: "Photo saved to snapshot.jpg (4521 bytes)"
     """
-    device = os.getenv("CAMERA_AGENT_DEVICE", "ESP32-CAM")
+    device = os.getenv("CAMERA_AGENT_DEVICE", "ApiBLE")
 
-    client = CameraBleClient(device_name=device)
+    client = ApiBleClient(device_name=device)
     try:
         await client.connect()
         info = await client.capture(output_path)

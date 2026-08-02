@@ -5,7 +5,7 @@ Usage:
     uv run python -m camera_agent.main
 
 Prerequisites:
-    - ESP32-S3 running CameraBLE firmware (flashed from Robotics/firmware/apps/CameraBLE)
+    - ESP32-S3 running ApiBLE firmware (flashed from Robotics/firmware/apps/ApiBLE)
     - Bluetooth enabled on this computer
     - LLM configured via CAMERA_AGENT_PROVIDER / CAMERA_AGENT_MODEL env vars (or .env)
 """
@@ -29,7 +29,7 @@ async def main():
 
     print("Camera Agent")
     print("  Type 'exit' or 'quit' to stop.")
-    print("  Ensure CameraBLE firmware is running on ESP32-S3.")
+    print("  Ensure ApiBLE firmware is running on ESP32-S3.")
     print()
 
     while True:
