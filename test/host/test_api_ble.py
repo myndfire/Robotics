@@ -19,20 +19,28 @@ via three BLE services (CA00, BA00, CF00).
        uv run python test_api_ble.py                     # single snapshot
        uv run python test_api_ble.py --stream 5 --delay 2  # 5 captures
        uv run python test_api_ble.py --camera-settings     # read settings
-       uv run python test_api_ble.py --set-cam quality=10  # change setting
-       uv run python test_api_ble.py --pin 1:out           # configure GPIO
+        uv run python test_api_ble.py --set-cam quality=10  # change setting
+        uv run python test_api_ble.py --chunk-delay-ms 2    # tune BLE throughput
+        uv run python test_api_ble.py --pin 1:out           # configure GPIO
        uv run python test_api_ble.py --set-pin 1:1         # GPIO HIGH
        uv run python test_api_ble.py --get-pin 14          # read GPIO 14
        uv run python test_api_ble.py --config tenant_id=abc,user_id=xyz
-       uv run python test_api_ble.py --show-config         # read all config
-       uv run python test_api_ble.py --schema              # read config schema
+        uv run python test_api_ble.py --show-config         # read all config
+        uv run python test_api_ble.py --schema              # read config schema
+
+     BLE throughput knobs (firmware, persisted in NVS "cam"):
+        --chunk-delay-ms MS   delay between JPEG notify chunks (default 8)
+        --chunk-size N        fixed chunk bytes; 0 = auto-size from MTU
+        --ble-mtu N           local ATT MTU cap (23-517, default 517)
+
+     Default BLE scan timeout is 3s (override with --timeout).
 
 ── BLE Protocol ───────────────────────────────────────────────────
 
     Camera  CA00:
       CA01 Write  — "snapshot", "flash_on", "flash_off"
       CA02 Write+Read — settings string
-      CA03 Notify — chunked JPEG (240-byte chunks, 4-byte LE header)
+      CA03 Notify — chunked JPEG (chunk_size-byte chunks, 4-byte LE header)
       CA04 Read   — frame info JSON
       CA05 Read   — params schema JSON
 
@@ -58,8 +66,8 @@ async def main():
     parser = argparse.ArgumentParser(
         description="Test tool for ApiBLE unified firmware via embedded_system_services"
     )
-    parser.add_argument("--timeout", type=float, default=10.0,
-                        help="BLE scan timeout in seconds (default: 10)")
+    parser.add_argument("--timeout", type=float, default=3.0,
+                        help="BLE scan timeout in seconds (default: 3)")
 
     # Camera
     camera = parser.add_argument_group("Camera (CA00)")
@@ -75,6 +83,12 @@ async def main():
                         help="Read camera settings")
     camera.add_argument("--set-cam", type=str, default=None, metavar="KEY=VAL,...",
                         help="Update camera settings (e.g., quality=10,vflip=0)")
+    camera.add_argument("--chunk-delay-ms", type=int, default=None, metavar="MS",
+                        help="Set BLE chunk delay (ms) between notify chunks (persisted)")
+    camera.add_argument("--chunk-size", type=int, default=None, metavar="N",
+                        help="Fixed chunk size in bytes; 0 = auto-size from MTU (persisted)")
+    camera.add_argument("--ble-mtu", type=int, default=None, metavar="N",
+                        help="Local ATT MTU cap (23-517, persisted)")
     camera.add_argument("--cam-params", action="store_true",
                         help="Read valid camera settings schema")
 
@@ -107,7 +121,8 @@ async def main():
     # Default action: snapshot if nothing else specified
     if not any([
         args.snapshot is not None, args.stream > 0, args.flash,
-        args.camera_settings, args.set_cam, args.cam_params,
+        args.camera_settings, args.set_cam, args.cam_params, args.chunk_delay_ms is not None,
+        args.chunk_size is not None, args.ble_mtu is not None,
         args.pin, args.set_pin, args.get_pin, args.led, args.gpio_state,
         args.config, args.show_config, args.schema, args.clear_config
     ]):
@@ -119,6 +134,13 @@ async def main():
         await client.connect()
 
         # ── Camera ──────────────────────────────────────────────
+        if args.chunk_delay_ms is not None:
+            await client.set_camera_settings(chunk_delay_ms=args.chunk_delay_ms)
+        if args.chunk_size is not None:
+            await client.set_camera_settings(chunk_size=args.chunk_size)
+        if args.ble_mtu is not None:
+            await client.set_camera_settings(ble_mtu=args.ble_mtu)
+
         if args.set_cam:
             settings = {}
             for pair in args.set_cam.split(","):

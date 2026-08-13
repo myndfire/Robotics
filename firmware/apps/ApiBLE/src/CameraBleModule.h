@@ -20,11 +20,16 @@
  * BLE Service 0000CA00:
  *   CA01 Write  — snapshot, flash_on, flash_off
  *   CA02 Write+Read — settings string (quality, brightness, vflip, ...)
- *   CA03 Notify — chunked JPEG (240-byte chunks, 4-byte LE size header)
+ *   CA03 Notify — chunked JPEG (chunk_size-byte chunks, 4-byte LE size header)
  *   CA04 Read   — frame info JSON
  *   CA05 Read   — settings params schema
  *
  * Settings are persisted to NVS namespace "cam".
+ *
+ * BLE throughput knobs (also persisted):
+ *   chunk_size     0 = auto-size from negotiated MTU (default), else fixed bytes
+ *   chunk_delay_ms delay between notify chunks (ms)
+ *   ble_mtu        local ATT MTU cap applied via BLEDevice::setMTU
  */
 
 class CameraBleModule {
@@ -36,6 +41,10 @@ public:
 
     /* Register CA00 service + characteristics on shared server. */
     void attach(BLEServer* server);
+
+    /* Called by ApiBleManager when the peer negotiates a new ATT MTU.
+     * Auto-sizes the frame chunk size to fit one notification. */
+    void onMtuChanged(uint16_t mtu);
 
 private:
     // ── BLE UUIDs ─────────────────────────────────────────────────
@@ -51,7 +60,8 @@ private:
     static const uint16_t BLE_TASK_STACK  = 8192;
     static const uint8_t  CAM_TASK_PRIO   = 1;
     static const uint8_t  BLE_TASK_PRIO   = 2;
-    static const uint16_t CHUNK_SIZE      = 240;
+    static const uint16_t CHUNK_SIZE_DEF  = 240;
+    static const uint16_t MTU_MIN         = 23;
 
     // ── Helpers ───────────────────────────────────────────────────
     void _setupCamera();
@@ -69,6 +79,7 @@ private:
     String _frameSizeToString() const;
     String _wbToString() const;
     String _buildParamsJson() const;
+    void   _applyChunkConfig();
 
     // ── FreeRTOS task entries ───────────────────────────────────
     static void _cameraTaskEntry(void* pv);
@@ -114,4 +125,11 @@ private:
     bool                           _savedAecOn{true};
     uint16_t                       _savedShutter{0};
     uint8_t                        _savedGain{0};
+
+    // ── BLE throughput settings ─────────────────────────────────
+    uint16_t                       _chunkSize{CHUNK_SIZE_DEF};
+    uint16_t                       _chunkSizeOverride{0};  // 0 = auto-size from MTU
+    uint16_t                       _chunkDelayMs{8};        // delay between notify chunks
+    uint16_t                       _bleMtu{517};            // local ATT MTU cap
+    uint16_t                       _negotiatedMtu{0};       // peer-negotiated, 0 until connect
 };

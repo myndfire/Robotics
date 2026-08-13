@@ -63,8 +63,7 @@ asyncio.run(main())
 |---|---|---|---|
 | `connect(name)` | `name: str = "ApiBLE"` | `None` | Scan and connect |
 | `disconnect()` | — | `None` | Disconnect |
-| `capture(path)` | `output_path: str` | `dict` | Take photo, save JPEG |
-| `stream(count, delay, pattern)` | `count: int, delay_sec: float` | `list[dict]` | Capture N photos |
+| `capture(path)` | `output_path: str` | `dict` | Take photo, save JPEG || `stream(count, delay, pattern)` | `count: int, delay_sec: float` | `list[dict]` | Capture N photos |
 | `flash_capture(path)` | `output_path: str` | `dict` | Capture with flash LED |
 | `get_camera_settings()` | — | `dict` | Read camera settings |
 | `set_camera_settings(**kwargs)` | `quality, size, brightness, ...` | `None` | Update camera settings |
@@ -87,14 +86,20 @@ asyncio.run(main())
 |---|---|---|---|
 | Control (CA01) | `...CA01` | Write | Commands: `snapshot`, `flash_on`, `flash_off`, `save`, `reset` |
 | Settings (CA02) | `...CA02` | Write+Read | Key=value pairs: `quality=10,size=QVGA` |
-| Frame (CA03) | `...CA03` | Notify | Chunked JPEG delivery (240-byte chunks) |
+| Frame (CA03) | `...CA03` | Notify | Chunked JPEG delivery (chunk_size-byte chunks) |
 | Info (CA04) | `...CA04` | Read | Frame metadata: `{"size":N,"w":W,"h":H,"q":Q}` |
 | Params (CA05) | `...CA05` | Read | Valid settings schema |
 
 Frame chunking protocol:
-1. First notification: `[4 bytes total_size LE]` + up to 240 bytes JPEG
-2. Subsequent: up to 240 bytes continuation
+1. First notification: `[4 bytes total_size LE]` + up to `chunk_size` bytes JPEG
+2. Subsequent: up to `chunk_size` bytes continuation
 3. Client accumulates until `total_size` reached
+
+The firmware auto-sizes `chunk_size` to the negotiated ATT MTU (one notification per chunk) and exposes `ble_mtu`, `chunk_size`, and `chunk_delay_ms` as persisted camera settings (see [BLE Throughput](../test/host/README.md#ble-throughput)). Set them over the air via `set_camera_settings`:
+
+```python
+await api.set_camera_settings(ble_mtu=517, chunk_delay_ms=2)
+```
 
 ### GPIO Service (`0000BA00-0000-1000-8000-00805F9B34FB`)
 

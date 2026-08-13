@@ -16,7 +16,7 @@ Protocol:
     Camera characteristics:
       CA01 Write  — "snapshot", "flash_on", "flash_off"
       CA02 Write+Read — settings string
-      CA03 Notify — chunked JPEG (240-byte chunks, 4-byte LE header)
+      CA03 Notify — chunked JPEG (chunk_size-byte chunks, 4-byte LE header; auto-sized from negotiated MTU)
       CA04 Read   — frame info JSON
       CA05 Read   — settings params schema
 
@@ -117,7 +117,11 @@ class ApiBleClient:
         self._frame_event = asyncio.Event()
         await self._client.start_notify(CA_FRAME_CHAR, self._on_frame_notify)
 
-        print(f"Connected: {self._client.is_connected}")
+        try:
+            mtu = getattr(self._client, "mtu_size", 0) or 0
+            print(f"Connected: {self._client.is_connected} (ATT MTU: {mtu})")
+        except Exception:
+            print(f"Connected: {self._client.is_connected}")
         return True
 
     async def disconnect(self):

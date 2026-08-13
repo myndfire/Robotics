@@ -1,4 +1,5 @@
 #include "CameraBleModule.h"
+#include <BLEDevice.h>
 
 // ── UUIDs ────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,9 @@ CameraBleModule::CameraBleModule() {}
 void CameraBleModule::begin() {
     _setupCamera();
     _loadSettings();
+
+    // Apply persisted local MTU cap (23..517) before advertising
+    BLEDevice::setMTU(_bleMtu);
 
     // Depth-1 queues: only latest matters
     _snapshotQueue = xQueueCreate(1, sizeof(bool));
@@ -85,6 +89,31 @@ void CameraBleModule::attach(BLEServer* server) {
     Serial.println("CameraBleModule: CA00 service attached");
 }
 
+void CameraBleModule::onMtuChanged(uint16_t mtu) {
+    _negotiatedMtu = mtu;
+    _applyChunkConfig();
+    Serial.printf("CAM BLE: negotiated MTU=%u chunk_size=%u delay_ms=%u\n",
+                  mtu, _chunkSize, _chunkDelayMs);
+}
+
+void CameraBleModule::_applyChunkConfig() {
+    if (_chunkSizeOverride > 0) {
+        _chunkSize = _chunkSizeOverride;
+        if (_chunkSize < 20) _chunkSize = 20;
+        if (_chunkSize > 510) _chunkSize = 510;  // fits chunk[521] buffer
+        return;
+    }
+    // Use the peer-negotiated MTU when known, else the local cap.
+    uint16_t mtu = _negotiatedMtu ? _negotiatedMtu : _bleMtu;
+    if (mtu >= MTU_MIN) {
+        // One notification carries at most mtu - 3 bytes; the first chunk
+        // also carries the 4-byte size header.
+        uint16_t maxPayload = mtu - 3;
+        _chunkSize = (maxPayload >= 4) ? (maxPayload - 4) : CHUNK_SIZE_DEF;
+        if (_chunkSize < 20) _chunkSize = 20;
+    }
+}
+
 // ── Camera setup ─────────────────────────────────────────────────────────
 
 void CameraBleModule::_setupCamera() {
@@ -121,7 +150,11 @@ void CameraBleModule::_loadSettings() {
     _gain         = _store.get<int>("gain", _gain);
     _flashGain    = _store.get<int>("flash_gain", _flashGain);
     _flashShutter = _store.get<int>("flash_shutter", _flashShutter);
+    _chunkSizeOverride = _store.get<int>("chunk_size", _chunkSizeOverride);
+    _chunkDelayMs = _store.get<int>("chunk_delay_ms", _chunkDelayMs);
+    _bleMtu       = _store.get<int>("ble_mtu", _bleMtu);
     _store.end();
+    _applyChunkConfig();
 }
 
 void CameraBleModule::_saveSettings() {
@@ -138,7 +171,12 @@ void CameraBleModule::_saveSettings() {
     _store.put<int>("gain", _gain);
     _store.put<int>("flash_gain", _flashGain);
     _store.put<int>("flash_shutter", _flashShutter);
+    _store.put<int>("chunk_size", _chunkSizeOverride);
+    _store.put<int>("chunk_delay_ms", _chunkDelayMs);
+    _store.put<int>("ble_mtu", _bleMtu);
     _store.end();
+    _applyChunkConfig();
+    BLEDevice::setMTU(_bleMtu);
 }
 
 // ── BLE callbacks ──────────────────────────────────────────────────────
@@ -231,12 +269,13 @@ void CameraBleModule::_sendFrameChunked() {
     }
 
     // Chunked delivery
-    uint8_t chunk[CHUNK_SIZE + 4];
+    uint32_t chunkSize = _chunkSize;
+    uint8_t chunk[521];  // max local MTU (517) - 3 + 4-byte header
     uint32_t header = totalSize;
     memcpy(chunk, &header, 4);
 
     uint32_t offset = 0;
-    uint32_t dataLen = (totalSize < CHUNK_SIZE) ? totalSize : CHUNK_SIZE;
+    uint32_t dataLen = (totalSize < chunkSize) ? totalSize : chunkSize;
     memcpy(chunk + 4, copyBuf + offset, dataLen);
 
     if (_frameChr) {
@@ -244,17 +283,17 @@ void CameraBleModule::_sendFrameChunked() {
         _frameChr->notify();
     }
     offset += dataLen;
-    vTaskDelay(pdMS_TO_TICKS(8));
+    vTaskDelay(pdMS_TO_TICKS(_chunkDelayMs));
 
     while (offset < totalSize) {
         dataLen = totalSize - offset;
-        if (dataLen > CHUNK_SIZE) dataLen = CHUNK_SIZE;
+        if (dataLen > chunkSize) dataLen = chunkSize;
         if (_frameChr) {
             _frameChr->setValue(copyBuf + offset, dataLen);
             _frameChr->notify();
         }
         offset += dataLen;
-        vTaskDelay(pdMS_TO_TICKS(8));
+        vTaskDelay(pdMS_TO_TICKS(_chunkDelayMs));
     }
 
     free(copyBuf);
@@ -278,7 +317,10 @@ String CameraBleModule::_buildSettingsString() const {
     s += "shutter=" + String(_shutter) + ",";
     s += "gain=" + String(_gain) + ",";
     s += "flash_gain=" + String(_flashGain) + ",";
-    s += "flash_shutter=" + String(_flashShutter);
+    s += "flash_shutter=" + String(_flashShutter) + ",";
+    s += "chunk_size=" + String(_chunkSizeOverride) + ",";
+    s += "chunk_delay_ms=" + String(_chunkDelayMs) + ",";
+    s += "ble_mtu=" + String(_bleMtu);
     return s;
 }
 
@@ -330,6 +372,17 @@ void CameraBleModule::_parseSettingsString(const String& input) {
         else if (key == "gain")       _gain = val.toInt();
         else if (key == "flash_gain") _flashGain = val.toInt();
         else if (key == "flash_shutter") _flashShutter = val.toInt();
+        else if (key == "chunk_size") {
+            _chunkSizeOverride = (uint16_t)val.toInt();
+            if (_chunkSizeOverride < 20 && _chunkSizeOverride != 0) _chunkSizeOverride = 20;
+            if (_chunkSizeOverride > 510) _chunkSizeOverride = 510;
+        }
+        else if (key == "chunk_delay_ms") _chunkDelayMs = (uint16_t)val.toInt();
+        else if (key == "ble_mtu") {
+            _bleMtu = (uint16_t)val.toInt();
+            if (_bleMtu < 23) _bleMtu = 23;
+            if (_bleMtu > 517) _bleMtu = 517;
+        }
 
         start = comma + 1;
     }
@@ -391,7 +444,10 @@ String CameraBleModule::_buildParamsJson() const {
            "\"wb\":{\"type\":\"enum\",\"values\":[\"auto\",\"sunny\",\"cloudy\",\"office\",\"home\"]},"
            "\"aec\":{\"type\":\"bool\",\"def\":true},"
            "\"shutter\":{\"min\":0,\"max\":1200,\"def\":0},"
-           "\"gain\":{\"min\":0,\"max\":30,\"def\":0}}";
+           "\"gain\":{\"min\":0,\"max\":30,\"def\":0},"
+           "\"chunk_size\":{\"type\":\"int\",\"min\":0,\"max\":510,\"def\":0,\"hint\":\"0=auto from MTU\"},"
+           "\"chunk_delay_ms\":{\"type\":\"int\",\"min\":0,\"max\":1000,\"def\":8},"
+           "\"ble_mtu\":{\"type\":\"int\",\"min\":23,\"max\":517,\"def\":517}}";
 }
 
 // ── FreeRTOS tasks ───────────────────────────────────────────────────────

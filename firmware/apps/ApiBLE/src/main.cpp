@@ -35,6 +35,7 @@ void setup() {
     delay(500);
 
     mgr.begin();
+    mgr.setMtuCallback([](uint16_t mtu) { cam.onMtuChanged(mtu); });
 
     cam.begin();
     cam.attach(mgr.server());
