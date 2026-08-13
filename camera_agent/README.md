@@ -153,6 +153,9 @@ Photo saved to snapshot.jpg (5619 bytes)
 > take a picture and describe it
 The image shows an interior space with a patterned carpet...
 
+> take a picture of something moving fast
+Photo saved to snapshot.jpg (6120 bytes)
+
 > what color are the walls?
 The walls appear to be white or off-white.
 
@@ -164,6 +167,7 @@ The walls appear to be white or off-white.
 | User Intent | Example Prompt | Tools Called |
 |---|---|---|
 | Capture only | "take a photo" | `take_picture` |
+| Fast-moving object | "take a picture of something moving fast" | `take_picture` (short exposure applied by default) |
 | Describe only | "describe snapshot.jpg" | `describe_picture` |
 | Capture + Describe | "take a picture and describe it" | `take_picture` → `describe_picture` |
 | Question about image | "is there a carpet?" | `describe_picture` |
@@ -177,6 +181,11 @@ The walls appear to be white or off-white.
 | `CAMERA_AGENT_MODEL` | `gpt-oss:20b` | Main model for conversation and tool calling |
 | `CAMERA_AGENT_VISION_MODEL` | `llava` | Vision model for image description (always Ollama) |
 | `CAMERA_AGENT_DEVICE` | `ApiBLE` | BLE device name to scan for |
+| `CAMERA_AGENT_AEC` | `off` | Auto-exposure applied on capture (`on`/`off`) |
+| `CAMERA_AGENT_SHUTTER` | `300` | Exposure value applied on capture (lower = less motion blur, darker) |
+| `CAMERA_AGENT_GAIN` | `20` | Sensor gain applied on capture (higher = brighter, noisier) |
+| `CAMERA_AGENT_BLE_MTU` | `517` | Local ATT MTU cap (23–517) for faster BLE transfer |
+| `CAMERA_AGENT_CHUNK_DELAY_MS` | `2` | BLE notify chunk delay in ms (lower = faster transfer) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `CAMERA_AGENT_DEBUG` | `0` | Enable tool execution logging (1/true/yes) |
 
@@ -189,7 +198,8 @@ Set `CAMERA_AGENT_DEBUG=1` in `.env` to see tool execution:
 🔧  [take_picture] start  args={'output_path': 'snapshot.jpg'}
 Scanning for 'ApiBLE'...
 Found: ApiBLE
-Connected: True
+Connected: True (ATT MTU: 247)
+Camera settings sent: aec=off,shutter=300,gain=20,ble_mtu=517,chunk_delay_ms=2
 Frame saved: snapshot.jpg (5619 bytes)
 🔧  [take_picture] end  success=True  duration=2.341s
 Photo saved to snapshot.jpg (5619 bytes)
@@ -212,6 +222,8 @@ Photo saved to snapshot.jpg (5619 bytes)
 | Agent takes 2+ photos for 1 request | Main model misunderstanding | System prompt says "exactly once"; shorten prompt if too complex |
 | Agent outputs raw JSON instead of calling tool | System prompt too long for model | Keep prompt concise (under 100 words for gpt-oss:20b) |
 | Description seems wrong | Vision model misidentifying | Expected for small objects in 320x240 frames; increase camera quality in firmware |
+| Fast object still blurry | Shutter too long | Lower `CAMERA_AGENT_SHUTTER` (e.g. 150) and raise `CAMERA_AGENT_GAIN` to compensate; tune per scene via `take_picture(shutter=..., gain=...)` |
+| Fast-motion shot too dark / noisy | Gain/ISO too low or high | Raise `shutter` or `gain`; for noise, raise `shutter` and lower `gain` |
 | Board connects but no image received | Missing BLE2902 descriptor | Verify CCCD on CA03 characteristic in firmware |
 
 ## Architecture Details
@@ -254,6 +266,7 @@ User Answer (text, based on description)
 
 **`take_picture` (capture.py):**
 - No vision capability — only moves bytes from ESP32 to disk
+- Applies fast-motion exposure settings by default (`aec=off`, `shutter=300`, `gain=20`) to freeze moving objects, plus BLE throughput knobs (`ble_mtu=517`, `chunk_delay_ms=2`) for a faster transfer. All are persisted in firmware NVS and overridable per-call (the model can pass `shutter`/`gain`) or via `CAMERA_AGENT_*` env vars.
 - Returns: `"Photo saved to {path} ({size} bytes)"`
 - Overwrites existing file (by design)
 
