@@ -17,7 +17,7 @@ A complete embedded-to-cloud stack for ESP32-S3 projects:
 Robotics/
 ├── README.md
 ├── AGENTS.md                  ← Agent-focused conventions and build notes
-├── firmware/                  ← ALL code flashed to ESP32-S3
+├── firmware/                  ← Firmware libraries and flashable apps
 │   ├── device_drivers/        ← Hardware abstraction libraries
 │   │   ├── CameraController/    → OV2640 camera, DMA, JPEG encoding
 │   │   ├── StorageController/  → NVS flash persistence
@@ -25,10 +25,10 @@ Robotics/
 │   │   ├── DisplayController/  → OLED display (U8g2)
 │   │   ├── GpioController/     → GPIO pin modes, digital/analog I/O
 │   │   └── ...
-│   ├── services/              ← Reusable firmware services
+│   ├── services/              ← Reusable service libraries (linked into apps)
 │   │   ├── CameraWebServer/   → WiFi HTTP camera server
 │   │   └── ...
-│   └── apps/                  ← Flashable firmware applications
+│   └── apps/                  ← Flashable firmware images
 │       ├── ApiBLE/            → Unified BLE app: Camera + GPIO + Config
 │       └── ...
 │
@@ -100,12 +100,25 @@ uv run python -m camera_agent.main
 
 | Tier | Language | Location | Runs on | What it does |
 |---|---|---|---|---|
-| **Device drivers** | C++ | `firmware/device_drivers/` | ESP32-S3 | Hardware abstraction (camera, GPIO, LED, storage, display) |
-| **Services** | C++ | `firmware/services/` | ESP32-S3 | Reusable protocols (BLE, HTTP, Serial, NVS settings) |
+| **Device drivers** | C++ | `firmware/device_drivers/` | Linked into an app image | Hardware abstraction (camera, GPIO, LED, storage, display) |
+| **Services** | C++ | `firmware/services/` | Linked into an app image | Reusable protocols (BLE, HTTP, Serial, NVS settings) |
 | **Apps** | C++ | `firmware/apps/` | ESP32-S3 | Complete flashable applications |
 | **Host library** | Python | `python-libs/` | Laptop | BLE/Serial clients for firmware services |
 | **Host tests** | Python | `test/host/` | Laptop | Integration tests against real hardware |
 | **AI Agent** | Python | `camera_agent/` | Laptop | LLM-powered natural language control |
+
+Only an **app image** runs on the device. Drivers and services are libraries compiled into an app at build time — they are never flashed or run standalone. The default `ApiBLE` app is self-contained: its Camera (CA00), GPIO (BA00), and Config (CF00) modules live in `firmware/apps/ApiBLE/src`, and it does not link any library from `firmware/services/`.
+
+| App | Services used |
+|---|---|
+| `ApiBLE` | none (app-local BLE modules) |
+| `CameraWebServerDemo` | `CameraWebServer` |
+| `MoistureMonitorDemo` | `MoistureMonitor` |
+| `TimedCycleControllerDemo` | `TimedCycleController` |
+| `StatusDashboardDemo` | `StatusDashboard` |
+| `MoisturePump` | `MoistureMonitor`, `TimedCycleController` |
+| `StatusPanel` | `StatusDashboard` |
+| `MultiSensor` | none (device drivers only) |
 
 ## Component Relationships
 
@@ -182,6 +195,7 @@ from embedded_system_services import ApiBleClient
 |---|---|
 | `camera_agent/README.md` | Natural language camera agent: architecture, setup, usage, troubleshooting |
 | `test/host/README.md` | Integration tests for all firmware services: BLE camera, GPIO, serial config |
+| [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md) | Firmware platform architecture and ApiBLE design (BLE, camera, GPIO, config) |
 | `firmware/apps/ApiBLE/README.md` | Unified BLE app: Camera + GPIO + Config |
 | `firmware/apps/README.md` | All flashable firmware apps |
 | `firmware/services/README.md` | Reusable firmware services |

@@ -2,16 +2,16 @@
 
 Reusable firmware service **libraries** that compose hardware drivers from `firmware/device_drivers/`. Each service provides a clean C++ API and a `library.json` manifest for PlatformIO dependency resolution.
 
-Services are **NOT flashable** — they have no `main.cpp` or `platformio.ini`. Use the apps in `firmware/apps/` to flash and run them.
+Services are **NOT flashable** — they have no `main.cpp` or `platformio.ini`. Use the apps in `firmware/apps/` to flash and run them. A service is compiled only into apps that add `../../services` to `lib_extra_dirs`; for example, the default `ApiBLE` app does **not** link any library from this directory.
 
 ## Service Index
 
-| Service | Composes | Description |
-|---|---|---|
-| [CameraWebServer](CameraWebServer/) | CameraController, WiFiManager, WebServer | WiFi-connected MJPEG camera web server with captive portal. Dark-theme dashboard, snapshot, and live streaming. |
-| [MoistureMonitor](MoistureMonitor/) | MoistureSensorController, DisplayController, StorageController | Soil moisture monitoring with DRY/WET/OK status. FreeRTOS sensor + display tasks, NVS-persisted calibration. |
-| [TimedCycleController](TimedCycleController/) | RelayController, DisplayController, StorageController | Duty-cycle pump/solenoid controller. Configurable ON/OFF durations persisted to NVS, live OLED countdowns. |
-| [StatusDashboard](StatusDashboard/) | DisplayController, WiFi | Multi-task system telemetry dashboard with scrolling OLED. Uptime, heap, PSRAM, WiFi RSSI, SDK version. |
+| Service | Composes | Used by | Description |
+|---|---|---|---|
+| [CameraWebServer](CameraWebServer/) | CameraController, WiFiManager, WebServer | `CameraWebServerDemo` | WiFi-connected MJPEG camera web server with captive portal. Dark-theme dashboard, snapshot, and live streaming. |
+| [MoistureMonitor](MoistureMonitor/) | MoistureSensorController, DisplayController, StorageController | `MoistureMonitorDemo`, `MoisturePump` | Soil moisture monitoring with DRY/WET/OK status. FreeRTOS sensor + display tasks, NVS-persisted calibration. |
+| [TimedCycleController](TimedCycleController/) | RelayController, DisplayController, StorageController | `TimedCycleControllerDemo`, `MoisturePump` | Duty-cycle pump/solenoid controller. Configurable ON/OFF durations persisted to NVS, live OLED countdowns. |
+| [StatusDashboard](StatusDashboard/) | DisplayController, WiFi | `StatusDashboardDemo`, `StatusPanel` | Multi-task system telemetry dashboard with scrolling OLED. Uptime, heap, PSRAM, WiFi RSSI, SDK version. |
 
 ## Architecture
 
