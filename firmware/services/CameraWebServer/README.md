@@ -11,10 +11,12 @@ WiFi-connected MJPEG camera web server with captive portal setup. Composes `Came
 
 ## Setup
 
+This is a library, not a flashable project. To try it, flash the demo app from the repo root:
+
 ```bash
-cd services/CameraWebServer
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+cd firmware/apps/CameraWebServerDemo
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 External project:

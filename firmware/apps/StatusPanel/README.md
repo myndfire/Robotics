@@ -13,8 +13,8 @@ Integration test composing `StatusDashboard` and `LedRGBController` into a syste
 
 ```bash
 cd firmware/apps/StatusPanel
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 No external wiring — uses on-board NeoPixel (GPIO 48) and I2C OLED (SDA=41, SCL=42).

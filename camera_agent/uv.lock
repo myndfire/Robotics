@@ -250,7 +250,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agent-harness", editable = "../../pydanticai-fluent/agent_harness" },
-    { name = "embedded-system-services", directory = "../python-libs" },
+    { name = "embedded-system-services", editable = "../python-libs" },
 ]
 
 [[package]]
@@ -593,7 +593,7 @@ wheels = [
 [[package]]
 name = "embedded-system-services"
 version = "1.0.0"
-source = { directory = "../python-libs" }
+source = { editable = "../python-libs" }
 dependencies = [
     { name = "bleak" },
     { name = "pyserial" },

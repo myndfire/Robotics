@@ -29,12 +29,18 @@ lib_extra_dirs =
 
 ## Build & Flash
 
-Every app is a standalone PlatformIO project. From the repo root (with `uv sync` already run once):
+Install PlatformIO once:
+
+```bash
+uv tool install platformio==6.1.19
+```
+
+Every app is a standalone PlatformIO project. From the repo root:
 
 ```bash
 cd firmware/apps/<App>
-uv run pio run --target upload             # build + flash
-uv run pio run --target upload --target monitor  # flash + open serial monitor
+pio run --target upload             # build + flash
+pio run --target upload --target monitor  # flash + open serial monitor
 ```
 
 ## Targets

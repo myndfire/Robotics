@@ -48,7 +48,7 @@ lib_extra_dirs =
 |---|---|---|
 | ApiBLE | ApiBleClient | `from embedded_system_services.api_ble import ApiBleClient` |
 
-Install: `pip install -e ./python-libs`. See `test/host/` for usage examples.
+For host-side usage, use the canonical test environment: `cd test/host && uv sync`. See `test/host/` for examples.
 
 ## Each Service Contains
 

@@ -21,10 +21,10 @@ void CameraBleModule::begin() {
     // Apply persisted local MTU cap (23..517) before advertising
     BLEDevice::setMTU(_bleMtu);
 
-    // Depth-1 queues: only latest matters
-    _snapshotQueue = xQueueCreate(1, sizeof(bool));
-    _frameQueue    = xQueueCreate(1, sizeof(camera_fb_t*));
-    _frameMutex    = xSemaphoreCreateMutex();
+    // Command queue is FIFO; frame queue is depth-1 (latest frame wins).
+    _commandQueue = xQueueCreate(COMMAND_QUEUE_DEPTH, sizeof(CameraCommand));
+    _frameQueue   = xQueueCreate(1, sizeof(camera_fb_t*));
+    _frameMutex   = xSemaphoreCreateMutex();
 
     xTaskCreatePinnedToCore(_cameraTaskEntry, "cam_task", CAM_TASK_STACK,
                             this, CAM_TASK_PRIO, &_camTaskHandle, 0);
@@ -187,26 +187,67 @@ void CameraBleModule::_onControlWrite() {
     Serial.printf("CAM BLE: control \"%s\"\n", cmd.c_str());
 
     if (cmd == "snapshot") {
-        bool flag = true;
-        xQueueOverwrite(_snapshotQueue, &flag);
+        _enqueueCommand(CameraCommand::Snapshot);
+    }
+    else if (cmd == "flash_snapshot") {
+        _enqueueCommand(CameraCommand::FlashSnapshot);
     }
     else if (cmd == "flash_on") {
-        _flashOn = true;
-        _savedAecOn = _aecOn;
-        _savedShutter = _shutter;
-        _savedGain = _gain;
-        _cam.setAecMode(false);
-        _cam.setAecValue(_flashShutter);
-        _cam.setAgcGain(_flashGain);
-        _cam.flashOn();
+        _enableFlash();
     }
     else if (cmd == "flash_off") {
-        _flashOn = false;
-        _cam.flashOff();
-        _cam.setAecMode(_savedAecOn);
-        _cam.setAecValue(_savedShutter);
-        _cam.setAgcGain(_savedGain);
+        _disableFlash();
     }
+}
+
+void CameraBleModule::_enqueueCommand(CameraCommand cmd) {
+    if (!_commandQueue) return;
+    if (xQueueSend(_commandQueue, &cmd, 0) != pdTRUE) {
+        Serial.println("CAM BLE: command queue full");
+    }
+}
+
+void CameraBleModule::onDisconnect() {
+    // The flash capture sequence owns cleanup while it is running.
+    if (_flashOn && !_flashCaptureInProgress) {
+        _disableFlash();
+    }
+}
+
+// ── Flash state ──────────────────────────────────────────────────────────
+
+void CameraBleModule::_enableFlash() {
+    if (_flashOn) return;
+    _saveExposureState();
+    _applyFlashExposure();
+    _cam.flashOn();
+    _flashOn = true;
+}
+
+void CameraBleModule::_disableFlash() {
+    _cam.flashOff();
+    if (_flashOn) {
+        _restoreExposureState();
+        _flashOn = false;
+    }
+}
+
+void CameraBleModule::_saveExposureState() {
+    _savedAecOn = _aecOn;
+    _savedShutter = _shutter;
+    _savedGain = _gain;
+}
+
+void CameraBleModule::_restoreExposureState() {
+    _cam.setAecMode(_savedAecOn);
+    _cam.setAecValue(_savedShutter);
+    _cam.setAgcGain(_savedGain);
+}
+
+void CameraBleModule::_applyFlashExposure() {
+    _cam.setAecMode(false);
+    _cam.setAecValue(_flashShutter);
+    _cam.setAgcGain(_flashGain);
 }
 
 void CameraBleModule::_onSettingsWrite(const String& input) {
@@ -221,83 +262,141 @@ void CameraBleModule::_onSettingsRead() {
 
 // ── Frame delivery ───────────────────────────────────────────────────────
 
-void CameraBleModule::_sendFrameChunked() {
-    if (!_frameChr) return;   // guard: not attached yet
-
-    camera_fb_t* fb = nullptr;
-    bool ownBuffer = false;
-
-    if (_frameMutex && xSemaphoreTake(_frameMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-        if (_frameQueue) xQueuePeek(_frameQueue, &fb, 0);
-        if (!fb) {
-            xSemaphoreGive(_frameMutex);
-        }
-    }
-
-    if (!fb) {
-        fb = _cam.capture();
-        ownBuffer = true;
-        if (!fb) {
-            Serial.println("CAM BLE: no frame available");
-            if (_infoChr) _infoChr->setValue("{\"size\":0,\"w\":0,\"h\":0,\"q\":0}");
-            return;
-        }
-    }
-
-    uint32_t totalSize = fb->len;
-    uint8_t* copyBuf = (uint8_t*)malloc(totalSize);
-    if (!copyBuf) {
-        if (!ownBuffer) xSemaphoreGive(_frameMutex);
-        if (ownBuffer)  _cam.release(fb);
-        Serial.println("CAM BLE: malloc failed");
+void CameraBleModule::_sendSnapshot() {
+    FrameCopy frame;
+    if (!_copyLatestFrame(frame)) {
+        Serial.println("CAM BLE: no frame available");
+        _clearFrameInfo();
         return;
     }
-    memcpy(copyBuf, fb->buf, totalSize);
+    _updateFrameInfo(frame);
+    _sendFrameCopy(frame);
+}
 
-    if (!ownBuffer && _frameMutex) xSemaphoreGive(_frameMutex);
-    if (ownBuffer)  _cam.release(fb);
+void CameraBleModule::_sendFlashSnapshot() {
+    FrameCopy frame;
+    if (!_acquireFlashFrame(frame)) {
+        Serial.println("CAM BLE: no flash frame available");
+        _clearFrameInfo();
+        return;
+    }
+    _updateFrameInfo(frame);
+    _sendFrameCopy(frame);
+}
 
-    // Update info (capture w/h before releasing the frame buffer)
-    uint32_t fw = fb->width;
-    uint32_t fh = fb->height;
-    if (_infoChr) {
-        char infoBuf[64];
-        snprintf(infoBuf, sizeof(infoBuf),
-                 "{\"size\":%lu,\"w\":%lu,\"h\":%lu,\"q\":%d}",
-                 totalSize, fw, fh, _jpegQuality);
-        _infoChr->setValue(infoBuf);
+bool CameraBleModule::_acquireFlashFrame(FrameCopy& out) {
+    _flashCaptureInProgress = true;
+    _enableFlash();
+    _waitForFreshFrames(FLASH_WARMUP_FRAMES);
+    bool copied = _copyLatestFrame(out);
+    _disableFlash();
+    _flashCaptureInProgress = false;
+    return copied;
+}
+
+bool CameraBleModule::_waitForFreshFrames(uint8_t count) {
+    if (count == 0) return true;
+    uint32_t startSeq = _frameSequence;
+    uint32_t targetSeq = startSeq + count;
+    uint32_t startMs = millis();
+
+    while ((int32_t)(_frameSequence - targetSeq) < 0) {
+        if ((uint32_t)(millis() - startMs) >= FLASH_WARMUP_TIMEOUT_MS) {
+            Serial.println("CAM BLE: flash warmup timed out");
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return true;
+}
+
+bool CameraBleModule::_copyLatestFrame(FrameCopy& out) {
+    if (!_frameQueue || !_frameMutex) return false;
+
+    if (xSemaphoreTake(_frameMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        Serial.println("CAM BLE: frame mutex timeout");
+        return false;
     }
 
-    // Chunked delivery
+    camera_fb_t* fb = nullptr;
+    if (xQueuePeek(_frameQueue, &fb, 0) != pdTRUE || !fb || fb->len == 0) {
+        xSemaphoreGive(_frameMutex);
+        return false;
+    }
+
+    FrameCopy copy;
+    copy.len = fb->len;
+    copy.width = fb->width;
+    copy.height = fb->height;
+    copy.buf = (uint8_t*)malloc(copy.len);
+    if (!copy.buf) {
+        xSemaphoreGive(_frameMutex);
+        Serial.println("CAM BLE: malloc failed");
+        return false;
+    }
+
+    memcpy(copy.buf, fb->buf, copy.len);
+    xSemaphoreGive(_frameMutex);
+    out = copy;
+    return true;
+}
+
+void CameraBleModule::_updateFrameInfo(const FrameCopy& frame) {
+    if (!_infoChr) return;
+    char infoBuf[96];
+    snprintf(infoBuf, sizeof(infoBuf),
+             "{\"size\":%lu,\"w\":%lu,\"h\":%lu,\"q\":%d}",
+             (unsigned long)frame.len, (unsigned long)frame.width,
+             (unsigned long)frame.height, _jpegQuality);
+    _infoChr->setValue(infoBuf);
+}
+
+void CameraBleModule::_clearFrameInfo() {
+    if (_infoChr) _infoChr->setValue("{\"size\":0,\"w\":0,\"h\":0,\"q\":0}");
+}
+
+void CameraBleModule::_sendFrameCopy(FrameCopy& frame) {
+    if (!_frameChr || !frame.buf || frame.len == 0) {
+        _freeFrameCopy(frame);
+        return;
+    }
+
+    uint32_t totalSize = frame.len;
     uint32_t chunkSize = _chunkSize;
+    if (chunkSize == 0) chunkSize = CHUNK_SIZE_DEF;
+    if (chunkSize > 510) chunkSize = 510;
+
     uint8_t chunk[521];  // max local MTU (517) - 3 + 4-byte header
     uint32_t header = totalSize;
     memcpy(chunk, &header, 4);
 
     uint32_t offset = 0;
     uint32_t dataLen = (totalSize < chunkSize) ? totalSize : chunkSize;
-    memcpy(chunk + 4, copyBuf + offset, dataLen);
-
-    if (_frameChr) {
-        _frameChr->setValue(chunk, dataLen + 4);
-        _frameChr->notify();
-    }
+    memcpy(chunk + 4, frame.buf, dataLen);
+    _frameChr->setValue(chunk, dataLen + 4);
+    _frameChr->notify();
     offset += dataLen;
     vTaskDelay(pdMS_TO_TICKS(_chunkDelayMs));
 
     while (offset < totalSize) {
         dataLen = totalSize - offset;
         if (dataLen > chunkSize) dataLen = chunkSize;
-        if (_frameChr) {
-            _frameChr->setValue(copyBuf + offset, dataLen);
-            _frameChr->notify();
-        }
+        _frameChr->setValue(frame.buf + offset, dataLen);
+        _frameChr->notify();
         offset += dataLen;
         vTaskDelay(pdMS_TO_TICKS(_chunkDelayMs));
     }
 
-    free(copyBuf);
-    Serial.printf("CAM BLE: sent %lu bytes\n", totalSize);
+    Serial.printf("CAM BLE: sent %lu bytes\n", (unsigned long)totalSize);
+    _freeFrameCopy(frame);
+}
+
+void CameraBleModule::_freeFrameCopy(FrameCopy& frame) {
+    if (frame.buf) free(frame.buf);
+    frame.buf = nullptr;
+    frame.len = 0;
+    frame.width = 0;
+    frame.height = 0;
 }
 
 // ── Settings helpers ─────────────────────────────────────────────────────
@@ -467,6 +566,7 @@ void CameraBleModule::_cameraTask() {
         if (fb && _frameQueue && _frameMutex) {
             xSemaphoreTake(_frameMutex, portMAX_DELAY);
             xQueueOverwrite(_frameQueue, &fb);
+            _frameSequence++;
             xSemaphoreGive(_frameMutex);
             if (oldFb) _cam.release(oldFb);
             oldFb = fb;
@@ -477,9 +577,16 @@ void CameraBleModule::_cameraTask() {
 
 void CameraBleModule::_bleTask() {
     for (;;) {
-        bool req = false;
-        if (_snapshotQueue && xQueueReceive(_snapshotQueue, &req, pdMS_TO_TICKS(10)) == pdTRUE) {
-            if (req) _sendFrameChunked();
+        CameraCommand cmd;
+        if (_commandQueue && xQueueReceive(_commandQueue, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
+            switch (cmd) {
+                case CameraCommand::Snapshot:
+                    _sendSnapshot();
+                    break;
+                case CameraCommand::FlashSnapshot:
+                    _sendFlashSnapshot();
+                    break;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }

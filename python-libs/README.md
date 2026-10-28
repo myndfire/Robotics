@@ -38,7 +38,7 @@ async def main():
     # Camera
     await api.capture("photo.jpg")
     await api.set_camera_settings(quality=10)
-    await api.flash_capture("night.jpg")
+    await api.capture_with_flash("night.jpg")
 
     # GPIO
     await api.configure_pin(1, "out")
@@ -63,8 +63,10 @@ asyncio.run(main())
 |---|---|---|---|
 | `connect(name)` | `name: str = "ApiBLE"` | `None` | Scan and connect |
 | `disconnect()` | — | `None` | Disconnect |
-| `capture(path)` | `output_path: str` | `dict` | Take photo, save JPEG || `stream(count, delay, pattern)` | `count: int, delay_sec: float` | `list[dict]` | Capture N photos |
-| `flash_capture(path)` | `output_path: str` | `dict` | Capture with flash LED |
+| `capture(path)` | `output_path: str` | `dict` | Take photo, save JPEG |
+| `capture_with_flash(path)` | `output_path: str` | `dict` | Take photo using the firmware's atomic flash-snapshot command |
+| `flash_capture(path)` | `output_path: str` | `dict` | Compatibility alias for `capture_with_flash()` |
+| `stream(count, delay, pattern)` | `count: int, delay_sec: float` | `list[dict]` | Capture N photos |
 | `get_camera_settings()` | — | `dict` | Read camera settings |
 | `set_camera_settings(**kwargs)` | `quality, size, brightness, ...` | `None` | Update camera settings |
 | `get_camera_params()` | — | `dict` | Read valid settings schema |
@@ -84,7 +86,7 @@ asyncio.run(main())
 
 | Characteristic | UUID | Properties | Purpose |
 |---|---|---|---|
-| Control (CA01) | `...CA01` | Write | Commands: `snapshot`, `flash_on`, `flash_off`, `save`, `reset` |
+| Control (CA01) | `...CA01` | Write | Commands: `snapshot`, `flash_snapshot`, `flash_on`, `flash_off` |
 | Settings (CA02) | `...CA02` | Write+Read | Key=value pairs: `quality=10,size=QVGA` |
 | Frame (CA03) | `...CA03` | Notify | Chunked JPEG delivery (chunk_size-byte chunks) |
 | Info (CA04) | `...CA04` | Read | Frame metadata: `{"size":N,"w":W,"h":H,"q":Q}` |
@@ -133,6 +135,7 @@ See `../test/host/` for integration tests:
 
 ```bash
 cd ../test/host
+uv sync
 uv run python test_api_ble.py --snapshot
 uv run python test_api_ble.py --stream 3
 uv run python test_api_ble.py --config tenant_id=abc

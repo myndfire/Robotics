@@ -17,8 +17,8 @@
  *   - SSD1306 128x32 OLED (SDA=41, SCL=42)
  *
  * Run:
- *   uv run pio run --target upload
- *   uv run pio run --target upload --target monitor
+ *   pio run --target upload
+ *   pio run --target upload --target monitor
  */
 
 #include <Arduino.h>

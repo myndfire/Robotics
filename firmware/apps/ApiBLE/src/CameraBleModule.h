@@ -15,10 +15,10 @@
  *
  * FreeRTOS producer-consumer architecture:
  *   - _cameraTask  (Core 0): continuous capture → _frameQueue (depth-1)
- *   - _deliveryTask(Core 1): waits on _snapshotQueue → peeks frame → chunks via CA03
+ *   - _bleTask     (Core 1): drains commands → copies frame → chunks via CA03
  *
  * BLE Service 0000CA00:
- *   CA01 Write  — snapshot, flash_on, flash_off
+ *   CA01 Write  — snapshot, flash_snapshot, flash_on, flash_off
  *   CA02 Write+Read — settings string (quality, brightness, vflip, ...)
  *   CA03 Notify — chunked JPEG (chunk_size-byte chunks, 4-byte LE size header)
  *   CA04 Read   — frame info JSON
@@ -46,7 +46,22 @@ public:
      * Auto-sizes the frame chunk size to fit one notification. */
     void onMtuChanged(uint16_t mtu);
 
+    /* Called by ApiBleManager after the peer disconnects. */
+    void onDisconnect();
+
 private:
+    enum class CameraCommand : uint8_t {
+        Snapshot,
+        FlashSnapshot,
+    };
+
+    struct FrameCopy {
+        uint8_t* buf{nullptr};
+        uint32_t len{0};
+        uint32_t width{0};
+        uint32_t height{0};
+    };
+
     // ── BLE UUIDs ─────────────────────────────────────────────────
     static const char* CAMERA_SERVICE_UUID;
     static const char* CONTROL_CHAR_UUID;
@@ -62,6 +77,9 @@ private:
     static const uint8_t  BLE_TASK_PRIO   = 2;
     static const uint16_t CHUNK_SIZE_DEF  = 240;
     static const uint16_t MTU_MIN         = 23;
+    static const uint8_t  COMMAND_QUEUE_DEPTH = 4;
+    static const uint8_t  FLASH_WARMUP_FRAMES = 2;
+    static const uint32_t FLASH_WARMUP_TIMEOUT_MS = 800;
 
     // ── Helpers ───────────────────────────────────────────────────
     void _setupCamera();
@@ -72,7 +90,21 @@ private:
     void _onSettingsWrite(const String& input);
     void _onSettingsRead();
 
-    void _sendFrameChunked();
+    void _enqueueCommand(CameraCommand cmd);
+    void _sendSnapshot();
+    void _sendFlashSnapshot();
+    bool _acquireFlashFrame(FrameCopy& out);
+    void _enableFlash();
+    void _disableFlash();
+    void _saveExposureState();
+    void _restoreExposureState();
+    void _applyFlashExposure();
+    bool _waitForFreshFrames(uint8_t count);
+    bool _copyLatestFrame(FrameCopy& out);
+    void _updateFrameInfo(const FrameCopy& frame);
+    void _clearFrameInfo();
+    void _sendFrameCopy(FrameCopy& frame);
+    void _freeFrameCopy(FrameCopy& frame);
 
     String _buildSettingsString() const;
     void   _parseSettingsString(const String& s);
@@ -91,7 +123,7 @@ private:
     CameraController     _cam{CameraController::NULLLAB_ESP32S3_CAM};
     StorageController    _store;
 
-    QueueHandle_t        _snapshotQueue{nullptr};
+    QueueHandle_t        _commandQueue{nullptr};
     QueueHandle_t        _frameQueue{nullptr};
     SemaphoreHandle_t    _frameMutex{nullptr};
     TaskHandle_t         _camTaskHandle{nullptr};
@@ -104,7 +136,8 @@ private:
     BLECharacteristic*   _infoChr{nullptr};
     BLECharacteristic*   _paramsChr{nullptr};
 
-    volatile bool        _pendingSnapshot{false};
+    volatile uint32_t    _frameSequence{0};
+    volatile bool        _flashCaptureInProgress{false};
 
     // ── Settings state ──────────────────────────────────────────
     CameraController::FrameSize    _frameSize{CameraController::QVGA};

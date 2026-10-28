@@ -36,6 +36,7 @@ void setup() {
 
     mgr.begin();
     mgr.setMtuCallback([](uint16_t mtu) { cam.onMtuChanged(mtu); });
+    mgr.setDisconnectCallback([] { cam.onDisconnect(); });
 
     cam.begin();
     cam.attach(mgr.server());
@@ -51,7 +52,7 @@ void setup() {
     Serial.println();
     Serial.println("ApiBLE ready:");
     Serial.println("  Advertising as \"ApiBLE\"");
-    Serial.println("  Camera  CA00  — snapshot, settings, chunked JPEG");
+    Serial.println("  Camera  CA00  — snapshot, flash_snapshot, settings, chunked JPEG");
     Serial.println("  GPIO    BA00  — pin control, optional NeoPixel");
     Serial.println("  Config  CF00  — extensible typed NVS + Serial CLI");
     Serial.println();

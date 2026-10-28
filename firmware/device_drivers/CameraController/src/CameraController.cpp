@@ -31,7 +31,7 @@
  *        (puts ESP32 into download / bootloader mode)
  *     3. Press the RST button (or cycle power)
  *     4. Flash via PlatformIO:
- *          uv run pio run -d <example> --target upload
+ *          pio run -d <example> --target upload
  *     5. Remove GPIO 0 → GND jumper
  *     6. Press RST button or cycle power to run the new firmware
  *     7. Open serial monitor at 921600 baud

@@ -13,8 +13,8 @@ Integration test composing 3 `AdcController` instances with `DisplayController` 
 
 ```bash
 cd firmware/apps/MultiSensor
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 ## Wiring

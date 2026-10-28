@@ -9,8 +9,8 @@
  * memory is low (<50KB free), and yellow in between.
  *
  * Run:
- *   uv run pio run --target upload
- *   uv run pio run --target upload --target monitor
+ *   pio run --target upload
+ *   pio run --target upload --target monitor
  */
 
 #include <Arduino.h>

@@ -16,25 +16,25 @@ User: "take a picture and describe it"
 │  Main Agent (CAMERA_AGENT_MODEL)                │
 │  Default: Qwen3-VL-4B-Instruct-4bit via vLLM    │
 │  • Conversational reasoning                       │
-│  • Tool calling (take_picture, describe_picture) │
+│  • Tool calling (capture tools, describe_picture)│
 │  • Answers user questions                        │
 └──────────────────┬──────────────────────────────┘
                    │
        ┌───────────┴───────────┐
        │                       │
        ▼                       ▼
-┌──────────────┐      ┌──────────────┐
-│ take_picture │      │describe_picture│
-│  (BLE tool)  │      │  (Vision tool) │
-└──────┬───────┘      └──────┬───────┘
-       │                      │
-       ▼                      ▼
-  ApiBLE               Qwen3-VL
-  (BLE device)          (Vision model)
-       │                      │
-       ▼                      ▼
-  snapshot.jpg          Description
-  (4-6KB JPEG)          (Text from Qwen3-VL)
+┌─────────────────────────┐      ┌─────────────────┐
+│ take_picture            │      │ describe_picture│
+│ take_picture_with_flash │      │  (Vision tool)  │
+└───────────┬─────────────┘      └────────┬────────┘
+            │                             │
+            ▼                             ▼
+            ApiBLE                        Qwen3-VL
+         (BLE device)                  (Vision model)
+            │                              │
+            ▼                              ▼
+        snapshot.jpg                   Description
+        (4-6KB JPEG)               (Text from Qwen3-VL)
 ```
 
 ### Request Flow
@@ -42,7 +42,8 @@ User: "take a picture and describe it"
 1. **User speaks** → Main agent (text model) interprets intent
 2. **Tool selection** → Agent decides which tool(s) to call
 3. **Tool execution**:
-   - `take_picture`: Connects via BLE, captures JPEG, saves to disk
+   - `take_picture`: Connects via BLE, captures a normal JPEG, saves to disk
+   - `take_picture_with_flash`: Captures using the firmware's atomic flash command
    - `describe_picture`: Reads JPEG, sends to vision model, returns description
 4. **Response generation** → Main agent answers using tool results
 
@@ -54,9 +55,9 @@ camera_agent/
 │   ├── main.py              # CLI entry point, loads .env
 │   ├── agent_factory.py     # Creates ManagedAgent with tools + system prompt
 │   ├── tools/               # Tools exposed to the agent
-│   │   ├── __init__.py      # Re-exports take_picture, describe_picture
+│   │   ├── __init__.py      # Re-exports capture and describe tools
 │   │   ├── _debug.py        # Shared logging decorator (CAMERA_AGENT_DEBUG)
-│   │   ├── capture.py       # take_picture: BLE camera capture
+│   │   ├── capture.py       # take_picture / take_picture_with_flash
 │   │   └── describe.py      # describe_picture: Vision model delegation
 │   └── vision.py            # Vision agent: ManagedAgent + ImageUrl
 ├── .env                     # Environment variables
@@ -69,7 +70,7 @@ camera_agent/
 | Component | Requirement |
 |---|---|
 | **Hardware** | ESP32-S3 CAM board with OV2640/OV3660 camera |
-| **Firmware** | ApiBLE firmware flashed on ESP32-S3 |
+| **Firmware** | ApiBLE firmware with `flash_snapshot` support flashed on ESP32-S3 |
 | **Host OS** | macOS, Linux, or Windows with Bluetooth |
 | **Python** | 3.11+ with [uv](https://docs.astral.sh/uv/) |
 | **LLM** | vLLM (or any OpenAI-compatible server) serving a multimodal model such as `Qwen3-VL-4B-Instruct-4bit` |
@@ -78,14 +79,22 @@ camera_agent/
 
 ### 1. Flash the ApiBLE Firmware
 
+Install PlatformIO once:
+
+```bash
+uv tool install platformio==6.1.19
+```
+
+Then flash from the firmware app directory:
+
 ```bash
 cd /path/to/Robotics/firmware/apps/ApiBLE
-uv run pio run --target upload
+pio run --target upload
 ```
 
 The ESP32 will advertise as `ApiBLE` over BLE after boot. Verify by checking the serial monitor:
 ```bash
-uv run pio run --target monitor
+pio run --target monitor
 # You should see: "Advertising as ApiBLE"
 ```
 
@@ -105,7 +114,7 @@ Verify the server is up and note the served model name:
 curl http://localhost:8000/v1/models
 ```
 
-Tool calling is required: without `--enable-auto-tool-choice` and a matching `--tool-call-parser`, the model cannot call `take_picture` or `describe_picture`. Ollama remains usable by pointing `CAMERA_AGENT_PROVIDER` / `CAMERA_AGENT_BASE_URL` at it.
+Tool calling is required: without `--enable-auto-tool-choice` and a matching `--tool-call-parser`, the model cannot call the capture tools or `describe_picture`. Ollama remains usable by pointing `CAMERA_AGENT_PROVIDER` / `CAMERA_AGENT_BASE_URL` at it.
 
 ### 3. Configure Environment
 
@@ -134,15 +143,28 @@ CAMERA_AGENT_DEBUG=0
 
 ### 4. Install Dependencies
 
+From the camera_agent directory:
+
 ```bash
+cd /path/to/Robotics/camera_agent
 uv sync
+```
+
+If another component's virtualenv is active, run `deactivate` first.
+
+If you previously installed a non-editable copy of the local BLE client, refresh it once:
+
+```bash
+uv sync --reinstall-package embedded-system-services
 ```
 
 This installs:
 - `agent-harness` — managed agent framework (from GitHub)
-- `embedded-system-services` — BLE client library (from local workspace)
+- `embedded-system-services` — BLE client library (local editable dependency)
 
 ### 5. Run the Agent
+
+From the camera_agent directory:
 
 ```bash
 uv run python -m camera_agent.main
@@ -173,9 +195,11 @@ The walls appear to be white or off-white.
 | User Intent | Example Prompt | Tools Called |
 |---|---|---|
 | Capture only | "take a photo" | `take_picture` |
+| Capture with flash | "take a photo with the flash" | `take_picture_with_flash` |
 | Fast-moving object | "take a picture of something moving fast" | `take_picture` (short exposure applied by default) |
 | Describe only | "describe snapshot.jpg" | `describe_picture` |
 | Capture + Describe | "take a picture and describe it" | `take_picture` → `describe_picture` |
+| Flash + Describe | "take a picture with the flash and describe it" | `take_picture_with_flash` → `describe_picture` |
 | Question about image | "is there a carpet?" | `describe_picture` |
 | Conditional | "if you see a cat, say meow" | `take_picture` → `describe_picture` → reasoning |
 
@@ -226,6 +250,7 @@ Photo saved to snapshot.jpg (5619 bytes)
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Device 'ApiBLE' not found` | Board not powered / not advertising | Check USB, press RST, verify firmware flashed |
+| Flash capture times out | Firmware predates `flash_snapshot` | Reflash the current ApiBLE firmware |
 | `Vision model '...' returned 404` | Served model name mismatch | Check `curl http://localhost:8000/v1/models` and match `CAMERA_AGENT_VISION_MODEL` to the served name |
 | `Could not reach the model server` | vLLM not running / wrong `CAMERA_AGENT_BASE_URL` | Start vLLM and verify with `curl http://localhost:8000/v1/models` |
 | Agent describes things not in photo | Main model hallucinating | Check `describe_picture` output in debug mode; vision model sees pixels, main model only sees text |
@@ -254,7 +279,7 @@ User Text
     │
     ▼
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Main Agent  │────→│ take_picture│────→│ ApiBLE     │
+│ Main Agent  │────→│ capture tool│────→│ ApiBLE     │
 │ (Qwen3-VL)  │     │ (BLE tool)  │     │ (Hardware)  │
 └─────────────┘     └─────────────┘     └──────┬──────┘
     │                                            │
@@ -277,8 +302,15 @@ User Answer (text, based on description)
 **`take_picture` (capture.py):**
 - No vision capability — only moves bytes from ESP32 to disk
 - Applies fast-motion exposure settings by default (`aec=off`, `shutter=300`, `gain=20`) to freeze moving objects, plus BLE throughput knobs (`ble_mtu=517`, `chunk_delay_ms=2`) for a faster transfer. All are persisted in firmware NVS and overridable per-call (the model can pass `shutter`/`gain`) or via `CAMERA_AGENT_*` env vars.
+- Never enables the flash.
 - Returns: `"Photo saved to {path} ({size} bytes)"`
 - Overwrites existing file (by design)
+
+**`take_picture_with_flash` (capture.py):**
+- Separate tool for explicit flash requests only.
+- Sends one `flash_snapshot` command; firmware enables flash, waits for exposure, copies the frame, disables flash, then streams it.
+- Returns: `"Photo saved to {path} ({size} bytes, flash on)"`
+- The model must not infer flash from low light or call it for ordinary photos.
 
 **`describe_picture` (describe.py):**
 - No BLE capability — only reads file and calls vision model
@@ -304,14 +336,21 @@ async def my_tool(param: str) -> str:
 2. Export in `src/camera_agent/tools/__init__.py`:
 ```python
 from camera_agent.tools.my_tool import my_tool
-__all__ = ["take_picture", "describe_picture", "my_tool", "log_tool_call"]
+__all__ = [
+    "take_picture",
+    "take_picture_with_flash",
+    "describe_picture",
+    "my_tool",
+    "log_tool_call",
+]
 ```
 
 3. Register in `src/camera_agent/agent_factory.py`:
 ```python
 from camera_agent.tools import my_tool
 # ...
-.with_tools(ToolRegistry().add_many(take_picture, describe_picture, my_tool))
+.with_tools(ToolRegistry().add_many(
+    take_picture, take_picture_with_flash, describe_picture, my_tool))
 ```
 
 ### Testing Without Hardware

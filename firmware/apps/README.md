@@ -19,10 +19,13 @@ Firmware applications that compose device drivers and, optionally, service libra
 
 ## Build
 
+Install PlatformIO once, then run from the repo root:
+
 ```bash
+uv tool install platformio==6.1.19
 cd firmware/apps/<App>
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 ## Import Pattern

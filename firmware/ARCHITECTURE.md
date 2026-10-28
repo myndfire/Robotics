@@ -295,7 +295,7 @@ All services share one server and advertise as **ApiBLE**. UUID suffix
 
 | Service | Characteristic | Properties | Payload |
 |---|---|---|---|
-| `CA00` Camera | `CA01` | Write | `snapshot`, `flash_on`, `flash_off` |
+| `CA00` Camera | `CA01` | Write | `snapshot`, `flash_snapshot`, `flash_on`, `flash_off` |
 | | `CA02` | Read + Write | CSV settings, e.g. `quality=20,vflip=1,...` |
 | | `CA03` | Notify | Chunked JPEG; first chunk starts with a 4-byte little-endian total size |
 | | `CA04` | Read | Frame info JSON: `{"size":N,"w":W,"h":H,"q":Q}` |
@@ -312,7 +312,7 @@ flowchart LR
 
     subgraph Server["Shared BLE server — advertises as ApiBLE"]
         subgraph CA["CA00 Camera"]
-            CA01["CA01 write<br/>snapshot · flash_on · flash_off"]
+            CA01["CA01 write<br/>snapshot · flash_snapshot<br/>flash_on · flash_off"]
             CA02["CA02 read/write<br/>settings CSV"]
             CA03["CA03 notify<br/>chunked JPEG"]
             CA04["CA04 read<br/>frame info JSON"]
@@ -357,7 +357,8 @@ flowchart LR
 `size`, `flash_gain`, or `flash_shutter`.
 
 Most sensor-backed keys take effect immediately. `size` is persisted and applied
-on the next boot; `flash_gain` and `flash_shutter` are consumed by `flash_on`.
+on the next boot; `flash_gain` and `flash_shutter` are consumed by
+`flash_snapshot` and `flash_on`.
 The chunk and MTU keys configure delivery, not the sensor.
 
 Defaults at first boot: `QVGA`, JPEG quality `20`, `vflip=1`, `hflip=0`,
@@ -367,8 +368,10 @@ cap `517`.
 ## Camera pipeline
 
 The camera path is a producer–consumer pipeline designed to keep capture and BLE
-delivery independent. The camera task always keeps the most recent frame ready;
-a host snapshot request only triggers delivery.
+delivery independent. The camera task always keeps the most recent frame ready.
+A normal host snapshot request triggers delivery; `flash_snapshot` additionally
+enables the LED, waits for fresh frames, copies one frame, and disables the LED
+before BLE transmission.
 
 ```mermaid
 flowchart LR
@@ -381,7 +384,7 @@ flowchart LR
     end
 
     FQ["frameQueue<br/>depth 1<br/>latest camera_fb_t*"]
-    SQ["snapshotQueue<br/>depth 1<br/>bool request"]
+    SQ["commandQueue<br/>depth 4<br/>snapshot / flash_snapshot"]
     MUT["frameMutex"]
     HOST["Host"]
     CA01["CA01 write"]
@@ -389,8 +392,8 @@ flowchart LR
     CA04["CA04 info"]
     HEAP["Heap copy"]
 
-    CA01 -->|"snapshot"| SQ
-    SQ -->|"enqueue"| BT
+    CA01 -->|"snapshot or flash_snapshot"| SQ
+    SQ -->|"dispatch"| BT
     CT -->|"overwrite latest"| FQ
     MUT --- FQ
     FQ -->|"peek"| BT
@@ -406,22 +409,25 @@ sequenceDiagram
     autonumber
     participant Host
     participant CA01 as CA01 control
-    participant SQ as snapshotQueue
+    participant SQ as commandQueue
     participant BT as cam_ble Core 1
     participant FQ as frameQueue
     participant CT as cam_task Core 0
     participant CA03 as CA03 notify
     participant CA04 as CA04 info
 
-    CT->>FQ: overwrite latest camera frame
-    Host->>CA01: "snapshot"
-    CA01->>SQ: overwrite request
-    SQ->>BT: request queued
-    BT->>FQ: peek latest frame
-    alt frame available
-        BT->>BT: malloc + memcpy frame
-    else no queued frame
-        BT->>BT: capture fallback
+    Host->>CA01: "snapshot" or "flash_snapshot"
+    CA01->>SQ: enqueue command
+    SQ->>BT: dispatch
+    alt flash_snapshot
+        BT->>BT: enable flash + apply exposure
+        loop 2 fresh frames
+            CT->>FQ: overwrite latest frame
+        end
+        BT->>FQ: peek + copy latest frame
+        BT->>BT: disable flash + restore exposure
+    else snapshot
+        BT->>FQ: peek + copy latest frame
     end
     BT->>CA04: set frame info JSON
     BT->>CA03: notify 4-byte size + first chunk
@@ -496,26 +502,26 @@ be reused as soon as the callback returns.
 
 | Queue | Depth | Semantics | Producer | Consumer | Purpose |
 |---|---:|---|---|---|---|
-| `snapshotQueue` | 1 | Overwrite; newest request wins | CA01 BLE callback | `cam_ble` (core 1) | Coalesce bursts of snapshot requests |
+| `commandQueue` | 4 | FIFO; producer drops when full | CA01 BLE callback | `cam_ble` (core 1) | Serialize normal and flash snapshot requests |
 | `frameQueue` | 1 | Overwrite under `frameMutex`; newest frame wins | `cam_task` (core 0) | `cam_ble` (core 1) | Keep the latest capture without a backlog |
 | `gpio cmd queue` | 8 | FIFO; producer waits when full | BA01 BLE callback | `gpio_task` (core 1) | Serialize pin/LED changes and NVS writes |
 | `cfg cmd queue` | 8 | FIFO; producer waits when full | CF01 BLE callback and USB-CDC CLI | `cfg_task` (core 1) | Serialize configuration and NVS writes |
 
-### Latest-value queues
+### Latest-value vs command queues
 
-The camera module uses depth-1 queues deliberately. `snapshotQueue` holds a
-single `bool` and is written with `xQueueOverwrite()`, so repeated requests that
-arrive before delivery starts collapse into one. `frameQueue` holds a single
-`camera_fb_t*` and is also overwritten, so `cam_ble` always works from the newest
-capture rather than replaying stale frames.
+The camera module uses a depth-1 `frameQueue` deliberately: it holds a single
+`camera_fb_t*` and is overwritten, so `cam_ble` always works from the newest
+capture rather than replaying stale frames. In contrast, `commandQueue` is a
+depth-4 FIFO so a `flash_snapshot` request is not silently replaced by a later
+`snapshot` request.
 
 The frame pointer is shared, so `cam_task` overwrites it while holding
 `frameMutex`, then releases the previous frame after the swap. `cam_ble` takes
-the same mutex with a 500 ms timeout, peeks the queue non-blocking, copies the
-JPEG into a heap buffer while the frame cannot be released, and drops the mutex
-before chunking. If no frame is queued, it falls back to a direct capture. This
-keeps the queue from growing and bounds the shared pipeline state to one queued
-frame plus one in-flight copy.
+the same mutex with a 500 ms timeout, peeks the queue, copies the JPEG and its
+metadata into a heap buffer while the frame cannot be released, and drops the
+mutex before chunking. There is no direct-capture fallback from the BLE task;
+`cam_task` remains the sole owner of the camera frame pool. This bounds the
+shared pipeline state to one queued frame plus one in-flight copy.
 
 ### Command queues
 
@@ -537,9 +543,9 @@ worker.
 Not every operation is queued. BA01 `get=` is handled synchronously because it is
 a fast read and BA02 must reflect the value immediately. CA02 settings and
 `flash_on`/`flash_off` run directly in the BLE callback because they are short
-state updates; for camera control, only snapshot capture and delivery are
-deferred. On the serial path, `show` is handled synchronously while `clear` is
-enqueued.
+state updates. `snapshot` and `flash_snapshot` are enqueued to `cam_ble`;
+`flash_snapshot` owns the flash-on, warmup, frame-copy, and flash-off sequence.
+On the serial path, `show` is handled synchronously while `clear` is enqueued.
 
 Worker receive timeouts (10 ms for `cam_ble`, 100 ms for `gpio_task` and
 `cfg_task`) let the tasks idle without busy-waiting. The resulting task/queue
@@ -550,7 +556,7 @@ topology is shown in [Concurrency and resources](#concurrency-and-resources).
 | Task | Core | Priority | Stack | Created by | Role |
 |---|---:|---:|---:|---|---|
 | `cam_task` | 0 | 1 | 4096 B | `CameraBleModule` | Continuous capture (~20 FPS) into a depth-1 queue |
-| `cam_ble` | 1 | 2 | 8192 B | `CameraBleModule` | Snapshot delivery and chunked BLE notifications |
+| `cam_ble` | 1 | 2 | 8192 B | `CameraBleModule` | Snapshot + flash-snapshot delivery, chunked BLE notifications |
 | `gpio_task` | 1 | 2 | 4096 B | `GpioBleModule` | Drains GPIO command queue, persists state |
 | `cfg_task` | 1 | 2 | 4096 B | `ConfigBleModule` | Drains config queue, updates NVS/state/schema |
 | Arduino `loop()` | 1 | default | — | framework | Polls `ConfigBleModule::handleSerial()` every 100 ms |
@@ -558,11 +564,11 @@ topology is shown in [Concurrency and resources](#concurrency-and-resources).
 Synchronization:
 
 - `frameQueue` depth 1 + `frameMutex` protect the latest camera frame.
-- `snapshotQueue` depth 1 coalesces repeated snapshot requests.
+- `commandQueue` depth 4 serializes snapshot and flash-snapshot requests.
 - GPIO and config queues have depth 8 and are drained by their own tasks.
-- Most BLE callbacks enqueue work. Snapshot requests are queued; flash commands
-  and CA02 settings are applied directly in the callback because those calls are
-  fast.
+- Most BLE callbacks enqueue work. Snapshot and flash-snapshot requests are
+  queued; manual flash commands and CA02 settings are applied directly in the
+  callback because those calls are fast.
 
 ```mermaid
 flowchart TB
@@ -578,7 +584,7 @@ flowchart TB
     end
 
     FQ["frameQueue (1)"]
-    SQ["snapshotQueue (1)"]
+    SQ["commandQueue (4)"]
     MUT["frameMutex"]
     GQ["gpio cmd queue (8)"]
     CQ["cfg cmd queue (8)"]
@@ -623,6 +629,8 @@ Known constraints of the reference app:
 - The camera keeps one queued frame at a time; the consumer always sees the
   latest frame, not every frame.
 - JPEG delivery copies the whole frame to a heap buffer before chunking.
+- `flash_snapshot` waits for two fresh frames (~100 ms at 20 FPS) before
+  copying, so flash captures have a small fixed warmup delay.
 - The config registry is limited to 16 keys, with 15-character names and
   31-character values.
 - GPIO command values are limited to short strings; pin support is documented

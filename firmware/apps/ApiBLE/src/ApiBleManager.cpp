@@ -14,8 +14,8 @@ void ApiBleManager::begin() {
             Serial.println("BLE: client connected");
         }
         void onDisconnect(BLEServer* s) override {
-            (void)s;
             Serial.println("BLE: client disconnected, restarting advertising");
+            if (_m->_disconnectCallback) _m->_disconnectCallback();
             s->getAdvertising()->start();
         }
         void onMtuChanged(BLEServer* s, esp_ble_gatts_cb_param_t* param) override {
@@ -44,6 +44,10 @@ void ApiBleManager::setLocalMtu(uint16_t mtu) {
 
 void ApiBleManager::setMtuCallback(std::function<void(uint16_t)> cb) {
     _mtuCallback = std::move(cb);
+}
+
+void ApiBleManager::setDisconnectCallback(std::function<void()> cb) {
+    _disconnectCallback = std::move(cb);
 }
 
 BLEServer* ApiBleManager::server() const {

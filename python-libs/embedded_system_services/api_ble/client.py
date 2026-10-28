@@ -3,7 +3,7 @@ ApiBleClient — Unified BLE client for the ApiBLE firmware app.
 
 Communicates with an ESP32-S3 running the ApiBLE app over BLE.
 Provides unified access to all three services:
-  - Camera  (CA00) — snapshots, settings, chunked JPEG
+  - Camera  (CA00) — snapshots, flash snapshots, settings, chunked JPEG
   - GPIO    (BA00) — pin control, optional NeoPixel LED
   - Config  (CF00) — extensible typed NVS configuration
 
@@ -14,7 +14,7 @@ Protocol:
       Config  CF00: 0000CF00-0000-1000-8000-00805F9B34FB
 
     Camera characteristics:
-      CA01 Write  — "snapshot", "flash_on", "flash_off"
+      CA01 Write  — "snapshot", "flash_snapshot", "flash_on", "flash_off"
       CA02 Write+Read — settings string
       CA03 Notify — chunked JPEG (chunk_size-byte chunks, 4-byte LE header; auto-sized from negotiated MTU)
       CA04 Read   — frame info JSON
@@ -53,6 +53,10 @@ CA_SETTINGS_CHAR  = "0000ca02-0000-1000-8000-00805f9b34fb"
 CA_FRAME_CHAR     = "0000ca03-0000-1000-8000-00805f9b34fb"
 CA_INFO_CHAR      = "0000ca04-0000-1000-8000-00805f9b34fb"
 CA_PARAMS_CHAR    = "0000ca05-0000-1000-8000-00805f9b34fb"
+
+# Camera commands
+CA_CMD_SNAPSHOT       = b"snapshot"
+CA_CMD_FLASH_SNAPSHOT = b"flash_snapshot"
 
 # GPIO
 BA_CONTROL_CHAR   = "0000ba01-0000-1000-8000-00805f9b34fb"
@@ -150,44 +154,56 @@ class ApiBleClient:
         if total >= self._frame_total:
             self._frame_event.set()
 
-    async def _wait_for_frame(self) -> bytes:
-        """Wait for a complete frame, return assembled bytes."""
+    async def _request_frame(self, command: bytes) -> bytes:
+        """Send one camera command and return the assembled JPEG."""
         self._frame_total = 0
         self._frame_chunks = []
         self._frame_event.clear()
 
-        await self._client.write_gatt_char(
-            CA_CONTROL_CHAR, b"snapshot", response=True
-        )
+        await self._client.write_gatt_char(CA_CONTROL_CHAR, command, response=True)
 
         try:
             await asyncio.wait_for(self._frame_event.wait(), timeout=self._chunk_timeout)
         except asyncio.TimeoutError:
-            raise RuntimeError("Timed out waiting for frame chunks")
+            name = command.decode(errors="replace")
+            raise RuntimeError(f"Timed out waiting for frame chunks after '{name}'")
 
         return b"".join(self._frame_chunks)
 
-    # ── Camera: Capture ───────────────────────────────────────
-
-    async def capture(self, output_path="snapshot.jpg"):
-        """Take a single photo and save to disk."""
-        data = await self._wait_for_frame()
-
+    def _save_frame(self, output_path: str, data: bytes) -> None:
+        """Write one JPEG frame to disk."""
         with open(output_path, "wb") as f:
             f.write(data)
 
-        size = len(data)
-        print(f"Frame saved: {output_path} ({size} bytes)")
-
-        info = {}
+    async def _read_frame_info(self) -> dict:
+        """Read CA04 frame metadata."""
         try:
             raw = await self._client.read_gatt_char(CA_INFO_CHAR)
             info = json.loads(bytes(raw).decode())
             print(f"  Info: {info.get('w', '?')}x{info.get('h', '?')}, quality={info.get('q', '?')}")
+            return info
         except Exception:
-            pass
+            return {}
 
-        return info
+    # ── Camera: Capture ───────────────────────────────────────
+
+    async def capture(self, output_path="snapshot.jpg"):
+        """Take a normal photo and save it to disk."""
+        data = await self._request_frame(CA_CMD_SNAPSHOT)
+        self._save_frame(output_path, data)
+        print(f"Frame saved: {output_path} ({len(data)} bytes)")
+        return await self._read_frame_info()
+
+    async def capture_with_flash(self, output_path="snapshot.jpg"):
+        """Take one photo using the firmware's atomic flash-snapshot command."""
+        data = await self._request_frame(CA_CMD_FLASH_SNAPSHOT)
+        self._save_frame(output_path, data)
+        print(f"Flash frame saved: {output_path} ({len(data)} bytes)")
+        return await self._read_frame_info()
+
+    async def flash_capture(self, output_path="snapshot.jpg"):
+        """Compatibility alias for :meth:`capture_with_flash`."""
+        return await self.capture_with_flash(output_path)
 
     async def stream(self, count=5, delay_sec=1.0, output_pattern="snapshot_{:02d}.jpg"):
         """Capture multiple consecutive photos."""
@@ -200,18 +216,6 @@ class ApiBleClient:
             if i < count - 1:
                 await asyncio.sleep(delay_sec)
         return results
-
-    async def flash_capture(self, output_path="snapshot.jpg"):
-        """Take a photo with flash LED enabled."""
-        await self._client.write_gatt_char(CA_CONTROL_CHAR, b"flash_on", response=True)
-        await asyncio.sleep(0.1)
-        data = await self._wait_for_frame()
-        await self._client.write_gatt_char(CA_CONTROL_CHAR, b"flash_off", response=True)
-
-        with open(output_path, "wb") as f:
-            f.write(data)
-
-        print(f"Flash photo saved: {output_path} ({len(data)} bytes)")
 
     # ── Camera: Settings ──────────────────────────────────────
 

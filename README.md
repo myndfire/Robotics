@@ -55,18 +55,21 @@ Robotics/
 
 ## Quick Start
 
-### 1. Clone and enter workspace
+Each block starts from the repository root. There is no root Python environment.
+
+If another component's virtualenv is active, run `deactivate` first. `uv run` uses the `pyproject.toml` in the folder you enter.
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/myndfire/Robotics.git
 cd Robotics
 ```
 
-### 2. Install PlatformIO (for firmware builds)
+### 2. Install PlatformIO once
 
 ```bash
-# From repo root — installs PlatformIO + dependencies
-uv sync
+uv tool install platformio==6.1.19
 ```
 
 ### 3. Flash firmware
@@ -74,16 +77,17 @@ uv sync
 ```bash
 # Unified BLE app: Camera + GPIO + Config (nulllaborg ESP32-S3 CAM)
 cd firmware/apps/ApiBLE
-uv run pio run --target upload
+pio run --target upload
 ```
 
-### 4. Run tests from host
+### 4. Run host tests
 
 ```bash
-# From repo root — uv finds workspace automatically
-uv run python test/host/test_api_ble.py --snapshot
-uv run python test/host/test_api_ble.py --stream 3
-uv run python test/host/test_api_ble.py --config tenant_id=abc
+cd test/host
+uv sync
+uv run python test_api_ble.py --snapshot
+uv run python test_api_ble.py --stream 3
+uv run python test_api_ble.py --config tenant_id=abc
 ```
 
 ### 5. Run the AI camera agent

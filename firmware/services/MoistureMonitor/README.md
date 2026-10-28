@@ -13,10 +13,12 @@ Soil moisture monitoring service with DRY/WET/OK status display. Composes `Moist
 
 ## Setup
 
+This is a library, not a flashable project. To try it, flash the demo app from the repo root:
+
 ```bash
-cd services/MoistureMonitor
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+cd firmware/apps/MoistureMonitorDemo
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 External project:

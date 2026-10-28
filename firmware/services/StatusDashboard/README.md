@@ -11,10 +11,12 @@ Multi-task system status dashboard with scrolling OLED display. Composes `Displa
 
 ## Setup
 
+This is a library, not a flashable project. To try it, flash the demo app from the repo root:
+
 ```bash
-cd services/StatusDashboard
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+cd firmware/apps/StatusDashboardDemo
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 External project:

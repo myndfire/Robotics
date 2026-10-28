@@ -7,24 +7,41 @@ Host-side test scripts that communicate with ESP32-S3 firmware over BLE.
 - **Python 3.10+** with [uv](https://docs.astral.sh/uv/) package manager
 - **ESP32-S3 hardware** with USB-C cable for flashing
 - **Bluetooth enabled** on your laptop (System Settings > Bluetooth > On)
-- **PlatformIO** (installed via `uv sync` at the repo root)
+- **PlatformIO** installed once as a uv tool: `uv tool install platformio==6.1.19`
 
 ## Quick Start
 
+Host-test commands run from this directory (`test/host`). Firmware commands run in the firmware app directory. Each block starts from the repo root.
+
+If another component's virtualenv is active, run `deactivate` first.
+
+Install PlatformIO once (from the repo root):
+
 ```bash
-# From repo root — install everything once
-uv sync
-
-# Flash the unified ApiBLE firmware
-cd firmware/apps/ApiBLE
-uv run pio run --target upload
-
-# Run tests from anywhere in the workspace
-uv run python test/host/test_api_ble.py --snapshot
+uv tool install platformio==6.1.19
 ```
 
-> **Tip:** `uv run` can be invoked from any subdirectory. uv automatically walks up to find `pyproject.toml` and uses the workspace-root venv.
->
+Flash ApiBLE (from the repo root):
+
+```bash
+cd firmware/apps/ApiBLE
+pio run --target upload
+```
+
+Install host dependencies and run a test (from the repo root):
+
+```bash
+cd test/host
+uv sync
+uv run python test_api_ble.py --snapshot
+```
+
+If this environment was created before `python-libs` was made editable, refresh it once:
+
+```bash
+uv sync --reinstall-package embedded-system-services
+```
+
 > **Photo speed:** The default BLE scan timeout is **3s** (override with `--timeout N`). Snapshot throughput is dominated by the JPEG-over-BLE transfer — see [BLE Throughput](#ble-throughput) below to tune it.
 
 ---
@@ -37,41 +54,45 @@ The ESP32 advertises as **"ApiBLE"**.
 
 ### Flash the Firmware
 
+From the repo root:
+
 ```bash
 cd firmware/apps/ApiBLE
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 ### Python Test Client
 
+All commands below run from `test/host`.
+
 ```bash
 # Camera
-uv run python test/host/test_api_ble.py --snapshot              # single snapshot
-uv run python test/host/test_api_ble.py --snapshot photo.jpg    # custom filename
-uv run python test/host/test_api_ble.py --stream 5 --delay 0.5  # 5 captures, 0.5s apart
-uv run python test/host/test_api_ble.py --flash                 # flash photo
-uv run python test/host/test_api_ble.py --camera-settings       # read camera settings
-uv run python test/host/test_api_ble.py --set-cam quality=10    # change setting
-uv run python test/host/test_api_ble.py --cam-params            # valid settings schema
+uv run python test_api_ble.py --snapshot              # single snapshot
+uv run python test_api_ble.py --snapshot photo.jpg    # custom filename
+uv run python test_api_ble.py --stream 5 --delay 0.5  # 5 captures, 0.5s apart
+uv run python test_api_ble.py --flash                 # atomic flash photo
+uv run python test_api_ble.py --camera-settings       # read camera settings
+uv run python test_api_ble.py --set-cam quality=10    # change setting
+uv run python test_api_ble.py --cam-params            # valid settings schema
 
 # BLE throughput tuning (persisted in firmware NVS)
-uv run python test/host/test_api_ble.py --chunk-delay-ms 2      # ms between JPEG notify chunks
-uv run python test/host/test_api_ble.py --chunk-size 240        # fixed chunk bytes; 0 = auto from MTU
-uv run python test/host/test_api_ble.py --ble-mtu 517           # local ATT MTU cap (23-517)
+uv run python test_api_ble.py --chunk-delay-ms 2      # ms between JPEG notify chunks
+uv run python test_api_ble.py --chunk-size 240        # fixed chunk bytes; 0 = auto from MTU
+uv run python test_api_ble.py --ble-mtu 517           # local ATT MTU cap (23-517)
 
 # GPIO
-uv run python test/host/test_api_ble.py --pin 1:out             # configure pin 1 as output
-uv run python test/host/test_api_ble.py --set-pin 1:1           # pin 1 HIGH
-uv run python test/host/test_api_ble.py --get-pin 14            # read pin 14
-uv run python test/host/test_api_ble.py --led red               # set LED color
-uv run python test/host/test_api_ble.py --gpio-state            # read full GPIO state
+uv run python test_api_ble.py --pin 1:out             # configure pin 1 as output
+uv run python test_api_ble.py --set-pin 1:1           # pin 1 HIGH
+uv run python test_api_ble.py --get-pin 14            # read pin 14
+uv run python test_api_ble.py --led red               # set LED color
+uv run python test_api_ble.py --gpio-state            # read full GPIO state
 
 # Config
-uv run python test/host/test_api_ble.py --config tenant_id=abc,user_id=xyz
-uv run python test/host/test_api_ble.py --show-config           # read all config
-uv run python test/host/test_api_ble.py --schema                # read config schema
-uv run python test/host/test_api_ble.py --clear-config          # clear all config
+uv run python test_api_ble.py --config tenant_id=abc,user_id=xyz
+uv run python test_api_ble.py --show-config           # read all config
+uv run python test_api_ble.py --schema                # read config schema
+uv run python test_api_ble.py --clear-config          # clear all config
 ```
 
 ### BLE Protocol Reference
@@ -80,7 +101,7 @@ uv run python test/host/test_api_ble.py --clear-config          # clear all conf
 
 | Char | UUID | Properties | Purpose |
 |---|---|---|---|
-| CA01 | `0000CA01-...` | Write | `snapshot`, `flash_on`, `flash_off` |
+| CA01 | `0000CA01-...` | Write | `snapshot`, `flash_snapshot`, `flash_on`, `flash_off` |
 | CA02 | `0000CA02-...` | Write+Read | Settings string (`quality=10,vflip=0,...`) |
 | CA03 | `0000CA03-...` | Notify | Chunked JPEG (chunk_size-byte chunks, 4-byte LE size header) |
 | CA04 | `0000CA04-...` | Read | Frame info JSON: `{"size":N,"w":W,"h":H,"q":Q}` |
@@ -118,13 +139,13 @@ Photo speed over BLE is dominated by the JPEG transfer, not the capture (the fir
 Example — enable a large MTU and drop the inter-chunk delay:
 
 ```bash
-uv run python test/host/test_api_ble.py --ble-mtu 517 --chunk-delay-ms 2
+uv run python test_api_ble.py --ble-mtu 517 --chunk-delay-ms 2
 ```
 
 The client logs the negotiated ATT MTU on connect (`Connected: ... (ATT MTU: 247)`), and the firmware prints the computed chunk size to serial (`CAM BLE: negotiated MTU=... chunk_size=...`). Compare snapshot timing before/after:
 
 ```bash
-time uv run python test/host/test_api_ble.py --snapshot
+time uv run python test_api_ble.py --snapshot
 ```
 
 ---
@@ -143,7 +164,7 @@ To freeze a fast-moving object you want a **short exposure** (low `shutter`) wit
 
 You can also reduce transfer time with the throughput knobs above:
 ```bash
-uv run python test/host/test_api_ble.py --ble-mtu 517 --chunk-delay-ms 2
+uv run python test_api_ble.py --ble-mtu 517 --chunk-delay-ms 2
 ```
 
 ### Recommended burst-capture command
@@ -152,7 +173,7 @@ Set a short exposure and burst files, saving each to its own JPEG:
 
 ```bash
 # configure exposure once (persisted), then burst 10 frames as fast as allowed
-uv run python test/host/test_api_ble.py \
+uv run python test_api_ble.py \
   --set-cam aec=off,shutter=300,gain=20,quality=15 \
   --stream 10 --delay 0 --ble-mtu 517 --chunk-delay-ms 2
 ```
@@ -161,7 +182,7 @@ Notes:
 - `--delay 0` captures as quickly as the transfer allows. A smaller `size`/`quality` and lower `chunk-delay-ms` make each frame finish faster, so the burst clears quicker between shots.
 - A single "fast object, well-lit" shot needs only the `--set-cam` exposure plus a `--snapshot`:
   ```bash
-  uv run python test/host/test_api_ble.py \
+  uv run python test_api_ble.py \
     --set-cam aec=off,shutter=200,gain=20,quality=12 --snapshot fast.jpg
   ```
 - If motion blur persists, lower `shutter` further (e.g. `150`) and raise `gain`; if the shot is too dark/noisy, raise `gain` or `shutter` slightly.

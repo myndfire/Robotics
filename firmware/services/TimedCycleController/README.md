@@ -13,10 +13,12 @@ Duty-cycle pump/solenoid/valve controller. Composes `RelayController` + `Display
 
 ## Setup
 
+This is a library, not a flashable project. To try it, flash the demo app from the repo root:
+
 ```bash
-cd services/TimedCycleController
-uv run pio run --target upload
-uv run pio run --target upload --target monitor
+cd firmware/apps/TimedCycleControllerDemo
+pio run --target upload
+pio run --target upload --target monitor
 ```
 
 External project:

@@ -7,26 +7,27 @@ via three BLE services (CA00, BA00, CF00).
 
 ── Quick Start ───────────────────────────────────────────────────
 
-    1. Flash the firmware:
-       cd firmware/apps/ApiBLE
-       uv run pio run --target upload
+    1. Install PlatformIO once (from the repo root):
+       uv tool install platformio==6.1.19
 
-    2. Install host deps:
-       cd test/host
-       uv sync
+    2. Flash the firmware (from the repo root):
+       cd firmware/apps/ApiBLE && pio run --target upload
 
-    3. Run tests:
-       uv run python test_api_ble.py                     # single snapshot
+    3. Install host deps (from test/host):
+       cd test/host && uv sync
+
+    4. Run tests (from test/host):
+       uv run python test_api_ble.py                       # single snapshot
        uv run python test_api_ble.py --stream 5 --delay 2  # 5 captures
        uv run python test_api_ble.py --camera-settings     # read settings
-        uv run python test_api_ble.py --set-cam quality=10  # change setting
-        uv run python test_api_ble.py --chunk-delay-ms 2    # tune BLE throughput
-        uv run python test_api_ble.py --pin 1:out           # configure GPIO
+       uv run python test_api_ble.py --set-cam quality=10  # change setting
+       uv run python test_api_ble.py --chunk-delay-ms 2    # tune BLE throughput
+       uv run python test_api_ble.py --pin 1:out           # configure GPIO
        uv run python test_api_ble.py --set-pin 1:1         # GPIO HIGH
        uv run python test_api_ble.py --get-pin 14          # read GPIO 14
        uv run python test_api_ble.py --config tenant_id=abc,user_id=xyz
-        uv run python test_api_ble.py --show-config         # read all config
-        uv run python test_api_ble.py --schema              # read config schema
+       uv run python test_api_ble.py --show-config         # read all config
+       uv run python test_api_ble.py --schema              # read config schema
 
      BLE throughput knobs (firmware, persisted in NVS "cam"):
         --chunk-delay-ms MS   delay between JPEG notify chunks (default 8)
@@ -38,7 +39,7 @@ via three BLE services (CA00, BA00, CF00).
 ── BLE Protocol ───────────────────────────────────────────────────
 
     Camera  CA00:
-      CA01 Write  — "snapshot", "flash_on", "flash_off"
+      CA01 Write  — "snapshot", "flash_snapshot", "flash_on", "flash_off"
       CA02 Write+Read — settings string
       CA03 Notify — chunked JPEG (chunk_size-byte chunks, 4-byte LE header)
       CA04 Read   — frame info JSON
@@ -78,7 +79,7 @@ async def main():
     camera.add_argument("--delay", type=float, default=1.0, metavar="SEC",
                         help="Delay between stream captures (default: 1s)")
     camera.add_argument("--flash", action="store_true",
-                        help="Take a photo with flash LED enabled")
+                        help="Take a photo using the atomic flash_snapshot command")
     camera.add_argument("--camera-settings", action="store_true",
                         help="Read camera settings")
     camera.add_argument("--set-cam", type=str, default=None, metavar="KEY=VAL,...",
@@ -158,7 +159,7 @@ async def main():
             print(json.dumps(params, indent=2))
 
         if args.flash:
-            await client.flash_capture(args.snapshot or "snapshot_flash.jpg")
+            await client.capture_with_flash(args.snapshot or "snapshot_flash.jpg")
         elif args.stream > 0:
             await client.stream(count=args.stream, delay_sec=args.delay)
         elif args.snapshot:

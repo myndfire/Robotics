@@ -32,6 +32,9 @@ public:
     /* Register a callback invoked with the negotiated peer MTU on change */
     void setMtuCallback(std::function<void(uint16_t)> cb);
 
+    /* Register a callback invoked after the peer disconnects */
+    void setDisconnectCallback(std::function<void()> cb);
+
     /* Start advertising all registered services */
     void startAdvertising();
 
@@ -39,4 +42,5 @@ private:
     BLEServer* _server;
     uint16_t   _localMtu{517};
     std::function<void(uint16_t)> _mtuCallback;
+    std::function<void()>         _disconnectCallback;
 };
