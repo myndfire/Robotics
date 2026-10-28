@@ -25,7 +25,8 @@ User: "take a picture and describe it"
        ▼                       ▼
 ┌─────────────────────────┐      ┌─────────────────┐
 │ take_picture            │      │ describe_picture│
-│ take_picture_with_flash │      │  (Vision tool)  │
+│ take_pictures           │      │  (Vision tool)  │
+│ take_picture_with_flash │      │                 │
 └───────────┬─────────────┘      └────────┬────────┘
             │                             │
             ▼                             ▼
@@ -43,6 +44,7 @@ User: "take a picture and describe it"
 2. **Tool selection** → Agent decides which tool(s) to call
 3. **Tool execution**:
    - `take_picture`: Connects via BLE, captures a normal JPEG, saves to disk
+   - `take_pictures`: Captures a timed series of normal JPEGs over one BLE connection
    - `take_picture_with_flash`: Captures using the firmware's atomic flash command
    - `describe_picture`: Reads JPEG, sends to vision model, returns description
 4. **Response generation** → Main agent answers using tool results
@@ -57,7 +59,7 @@ camera_agent/
 │   ├── tools/               # Tools exposed to the agent
 │   │   ├── __init__.py      # Re-exports capture and describe tools
 │   │   ├── _debug.py        # Shared logging decorator (CAMERA_AGENT_DEBUG)
-│   │   ├── capture.py       # take_picture / take_picture_with_flash
+│   │   ├── capture.py       # take_picture / take_pictures / take_picture_with_flash
 │   │   └── describe.py      # describe_picture: Vision model delegation
 │   └── vision.py            # Vision agent: ManagedAgent + ImageUrl
 ├── .env                     # Environment variables
@@ -196,6 +198,7 @@ The walls appear to be white or off-white.
 |---|---|---|
 | Capture only | "take a photo" | `take_picture` |
 | Capture with flash | "take a photo with the flash" | `take_picture_with_flash` |
+| Timed series | "take 3 photos with 3 seconds between them" | `take_pictures` (`count=3`, `interval_sec=3`) |
 | Fast-moving object | "take a picture of something moving fast" | `take_picture` (short exposure applied by default) |
 | Describe only | "describe snapshot.jpg" | `describe_picture` |
 | Capture + Describe | "take a picture and describe it" | `take_picture` → `describe_picture` |
@@ -306,6 +309,13 @@ User Answer (text, based on description)
 - Returns: `"Photo saved to {path} ({size} bytes)"`
 - Overwrites existing file (by design)
 
+**`take_pictures` (capture.py):**
+- Normal photos only — never uses flash.
+- Uses one BLE connection for the whole series.
+- Captures `count` photos and sleeps `interval_sec` between completed captures; no delay after the last photo.
+- Saves `photo1.jpg`, `photo2.jpg`, etc. by default.
+- Returns a confirmation listing the saved paths and sizes.
+
 **`take_picture_with_flash` (capture.py):**
 - Separate tool for explicit flash requests only.
 - Sends one `flash_snapshot` command; firmware enables flash, waits for exposure, copies the frame, disables flash, then streams it.
@@ -338,6 +348,7 @@ async def my_tool(param: str) -> str:
 from camera_agent.tools.my_tool import my_tool
 __all__ = [
     "take_picture",
+    "take_pictures",
     "take_picture_with_flash",
     "describe_picture",
     "my_tool",
@@ -350,7 +361,7 @@ __all__ = [
 from camera_agent.tools import my_tool
 # ...
 .with_tools(ToolRegistry().add_many(
-    take_picture, take_picture_with_flash, describe_picture, my_tool))
+    take_picture, take_pictures, take_picture_with_flash, describe_picture, my_tool))
 ```
 
 ### Testing Without Hardware

@@ -16,7 +16,7 @@
  *
  * BLE Service 0000BA00:
  *   BA01 Write  — key=val command pairs (pin=, set=, get=, led=)
- *   BA02 Read   — full state string
+ *   BA02 Read   — "led=<led>,<pin#>:<value>:<type>,..."
  *
  * Supported pins on ESP32-S3-CAM: 1, 14, 40, 41, 42
  *   - 40/41/42 are strapping pins; avoid external pull-down at boot.

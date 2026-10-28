@@ -44,6 +44,7 @@ async def main():
     await api.configure_pin(1, "out")
     await api.set_pin(1, 1)
     value = await api.get_pin(14)
+    metadata = await api.read_gpio_metadata()
 
     # Config
     await api.set_config(tenant_id="abc", user_id="xyz")
@@ -72,8 +73,9 @@ asyncio.run(main())
 | `get_camera_params()` | — | `dict` | Read valid settings schema |
 | `configure_pin(pin, mode)` | `pin: int, mode: str` | `None` | GPIO mode: `"out"`, `"in"`, `"ain"` |
 | `set_pin(pin, value)` | `pin: int, value: int` | `None` | Digital write |
-| `get_pin(pin)` | `pin: int` | `str` | Read pin value |
-| `read_gpio_state()` | — | `dict` | Read full GPIO/LED state |
+| `get_pin(pin)` | `pin: int` | `int \| None` | Read pin value and configured type |
+| `read_gpio_state()` | — | `dict` | Alias for `read_gpio_metadata()` |
+| `read_gpio_metadata()` | — | `dict` | LED state and pins as `{n: {"value", "type"}}` |
 | `set_led(color)` | `color: str` | `None` | LED color or `"off"` |
 | `get_config()` | — | `dict` | Read all config keys |
 | `set_config(**kwargs)` | `key=value` | `None` | Set typed config keys |
@@ -108,7 +110,7 @@ await api.set_camera_settings(ble_mtu=517, chunk_delay_ms=2)
 | Characteristic | UUID | Properties | Purpose |
 |---|---|---|---|
 | Control (BA01) | `...BA01` | Write | Commands: `led=red`, `pin=4:out`, `set=4:1`, `get=4` |
-| Status (BA02) | `...BA02` | Read | State: `led=r;g;b,pin4=1,pin7=512` |
+| Status (BA02) | `...BA02` | Read | State: `led=no_led,4:1:out,7:512:ain` |
 
 Multiple commands in one write (comma-separated):
 ```

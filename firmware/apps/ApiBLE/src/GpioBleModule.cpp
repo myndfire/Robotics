@@ -87,8 +87,9 @@ void GpioBleModule::_loadState() {
                         digitalWrite(num, val ? HIGH : LOW);
                     } else if (mode == 2) {
                         pinMode(num, INPUT);
+                        _pins[_pinCount].value = digitalRead(num);
                     } else if (mode == 3) {
-                        // analog input — no setup needed
+                        _pins[_pinCount].value = analogRead(num);
                     }
                     _pinCount++;
                 }
@@ -142,6 +143,15 @@ GpioBleModule::GpioPin* GpioBleModule::_getOrCreatePin(uint8_t number, uint8_t m
 
 // ── Status string ─────────────────────────────────────────────────────────
 
+static const char* modeName(uint8_t mode) {
+    switch (mode) {
+        case 1:  return "out";
+        case 2:  return "in";
+        case 3:  return "ain";
+        default: return "none";
+    }
+}
+
 String GpioBleModule::_buildStatus() {
     String s;
 #ifdef HAS_NEOPIXEL
@@ -149,8 +159,28 @@ String GpioBleModule::_buildStatus() {
 #else
     s += "led=no_led";
 #endif
+
+    // Insertion-sort pin indices so status output is stable and ordered.
+    uint8_t order[MAX_PINS];
+    for (uint8_t i = 0; i < _pinCount; i++) order[i] = i;
+    for (uint8_t i = 1; i < _pinCount; i++) {
+        uint8_t key = order[i];
+        int j = i - 1;
+        while (j >= 0 && _pins[order[j]].number > _pins[key].number) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+
     for (uint8_t i = 0; i < _pinCount; i++) {
-        s += ",pin" + String(_pins[i].number) + "=" + String(_pins[i].value);
+        const GpioPin& p = _pins[order[i]];
+        s += ",";
+        s += String(p.number);
+        s += ":";
+        s += String(p.value);
+        s += ":";
+        s += modeName(p.mode);
     }
     return s;
 }
@@ -214,9 +244,15 @@ void GpioBleModule::_handlePinConfig(const char* val) {
     GpioPin* p = _getOrCreatePin(num, mode);
     if (!p) return;
 
-    if (mode == 1) pinMode(num, OUTPUT);
-    else if (mode == 2) pinMode(num, INPUT);
-    else if (mode == 3) { /* analog input, no setup */ }
+    if (mode == 1) {
+        pinMode(num, OUTPUT);
+        digitalWrite(num, p->value ? HIGH : LOW);
+    } else if (mode == 2) {
+        pinMode(num, INPUT);
+        p->value = digitalRead(num);
+    } else if (mode == 3) {
+        p->value = analogRead(num);
+    }
 
     _saveState();
 }

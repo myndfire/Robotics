@@ -22,7 +22,7 @@ Protocol:
 
     GPIO characteristics:
       BA01 Write  — "pin=1:out", "set=1:1", "get=1", "led=red"
-      BA02 Read   — status string
+      BA02 Read   — "led=<led>,<pin#>:<value>:<type>,..."
 
     Config characteristics:
       CF01 Write  — "key=val,key=val,..."
@@ -269,29 +269,56 @@ class ApiBleClient:
         )
         print(f"GPIO write sent: {payload}")
 
-    async def get_pin(self, pin) -> str:
+    async def get_pin(self, pin) -> int | None:
         """Read a GPIO pin value."""
         payload = f"get={pin}"
         await self._client.write_gatt_char(
             BA_CONTROL_CHAR, payload.encode(), response=True
         )
         await asyncio.sleep(0.05)
-        state = await self.read_gpio_state()
-        pin_key = f"pin{pin}"
-        val = state.get(pin_key, "N/A")
-        print(f"GPIO {pin}: {val}")
-        return val
+        metadata = await self.read_gpio_metadata()
+        info = metadata["pins"].get(pin)
+        if info is None:
+            print(f"GPIO {pin}: N/A")
+            return None
+        print(f"GPIO {pin} ({info['type']}): {info['value']}")
+        return info["value"]
+
+    async def _read_gpio_raw(self) -> str:
+        """Read the raw BA02 status string."""
+        data = await self._client.read_gatt_char(BA_STATUS_CHAR)
+        return bytes(data).decode()
+
+    async def read_gpio_metadata(self) -> dict:
+        """Read GPIO/LED state with pin modes.
+
+        Returns:
+            {"led": "no_led", "pins": {1: {"value": 0, "type": "out"}}}
+        """
+        raw = await self._read_gpio_raw()
+        result = {"led": None, "pins": {}}
+        for item in raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if item.startswith("led="):
+                result["led"] = item[4:]
+                continue
+            fields = item.split(":")
+            if len(fields) < 3 or not fields[0].isdigit():
+                continue
+            pin = int(fields[0])
+            value = fields[1]
+            try:
+                value = int(value)
+            except ValueError:
+                pass
+            result["pins"][pin] = {"value": value, "type": fields[2]}
+        return result
 
     async def read_gpio_state(self) -> dict:
-        """Read full GPIO/LED state."""
-        data = await self._client.read_gatt_char(BA_STATUS_CHAR)
-        raw = bytes(data).decode()
-        parts = {}
-        for item in raw.split(","):
-            if "=" in item:
-                k, v = item.split("=", 1)
-                parts[k] = v
-        return parts
+        """Read full GPIO/LED state (alias for read_gpio_metadata)."""
+        return await self.read_gpio_metadata()
 
     async def set_led(self, color):
         """Set NeoPixel LED color (if present)."""

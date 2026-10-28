@@ -1,12 +1,19 @@
-"""BLE camera capture tools — ``take_picture`` and ``take_picture_with_flash``.
+"""BLE camera capture tools.
 
-Both tools wrap :class:`embedded_system_services.api_ble.ApiBleClient`.
+The tools are deliberately separate:
+
+- ``take_picture`` — one normal photo
+- ``take_pictures`` — a timed series of normal photos
+- ``take_picture_with_flash`` — one photo with the flash LED
+
+All tools wrap :class:`embedded_system_services.api_ble.ApiBleClient`.
 Normal captures use the firmware's plain snapshot command. Flash captures
 use the firmware's atomic ``flash_snapshot`` command, which owns flash
 enable, exposure settling, frame copy, and flash disable.
 
-The tools are deliberately separate: the model must choose the flash tool
-only when the user explicitly asks for flash.
+The model must choose the flash tool only when the user explicitly asks
+for flash, and must use ``take_pictures`` when the user asks for multiple
+photos or a delay.
 """
 
 import os
@@ -70,7 +77,8 @@ async def take_picture(
     """Take a normal photo using the ESP32-S3 BLE camera.
 
     This tool never uses the flash. Use ``take_picture_with_flash`` only
-    when the user explicitly asks for flash.
+    when the user explicitly asks for flash, and ``take_pictures`` when the
+    user asks for multiple photos or a delay.
 
     By default a short exposure (``aec=off``, low ``shutter``) with
     higher ``gain`` is configured to freeze motion, along with
@@ -115,6 +123,92 @@ async def take_picture(
 
     size = info.get("size", "unknown")
     return f"Photo saved to {output_path} ({size} bytes)"
+
+
+@log_tool_call
+async def take_pictures(
+    count: int,
+    interval_sec: float = 1.0,
+    output_prefix: str = "photo",
+    *,
+    shutter: int = DEFAULT_SHUTTER,
+    gain: int = DEFAULT_GAIN,
+    aec: str = DEFAULT_AEC,
+    ble_mtu: int = DEFAULT_BLE_MTU,
+    chunk_delay_ms: int = DEFAULT_CHUNK_DELAY_MS,
+    quality: int | None = None,
+) -> str:
+    """Take multiple normal photos with a delay between captures.
+
+    Use this tool when the user asks for more than one normal photo or
+    specifies an interval, for example "take 3 photos with 3 seconds
+    between them". Do not call ``take_picture`` repeatedly for a series.
+    This tool never uses the flash.
+
+    One BLE connection is opened for the whole series. The camera settings
+    are applied once, then ``ApiBleClient.stream()`` captures the requested
+    number of photos and sleeps between completed captures. There is no
+    delay after the final photo.
+
+    This tool does NOT describe the photos. To describe one, call
+    ``describe_picture`` with its returned file path.
+
+    Args:
+        count: Number of photos to capture. Must be at least 1.
+        interval_sec: Seconds to wait between completed captures. Must be
+            non-negative. Default: 1.0.
+        output_prefix: Filename prefix; files are saved as
+            ``<prefix>1.jpg``, ``<prefix>2.jpg``, etc. Default: "photo".
+        shutter: Exposure value (lower = shorter exposure = less motion
+            blur, but darker). Default: 300.
+        gain: Sensor gain/ISO to brighten short exposures (higher =
+            brighter but noisier). Default: 20.
+        aec: Auto-exposure mode ("on"/"off"). Default: "off".
+        ble_mtu: Local ATT MTU cap (23-517). Default: 517.
+        chunk_delay_ms: Delay between BLE notify chunks. Lower = faster
+            transfer. Default: 2.
+        quality: JPEG quality (0-63). When None (default), the firmware's
+            persisted value is left unchanged.
+
+    Returns:
+        str: Confirmation listing the saved files and sizes.
+    """
+    if count < 1:
+        return "count must be at least 1"
+    if interval_sec < 0:
+        return "interval_sec must be non-negative"
+    if not output_prefix or "{" in output_prefix or "}" in output_prefix:
+        return "output_prefix must be non-empty and must not contain braces"
+
+    device = os.getenv("CAMERA_AGENT_DEVICE", "ApiBLE")
+    settings = _build_settings(
+        shutter=shutter,
+        gain=gain,
+        aec=aec,
+        ble_mtu=ble_mtu,
+        chunk_delay_ms=chunk_delay_ms,
+        quality=quality,
+    )
+    output_pattern = f"{output_prefix}{{}}.jpg"
+
+    async with _camera_session(device) as client:
+        await client.set_camera_settings(**settings)
+        results = await client.stream(
+            count=count,
+            delay_sec=interval_sec,
+            output_pattern=output_pattern,
+        )
+
+    paths = [output_pattern.format(i) for i in range(1, count + 1)]
+    details = []
+    for path, info in zip(paths, results):
+        size = info.get("size", "unknown")
+        details.append(f"{path} ({size} bytes)")
+
+    return (
+        f"Captured {count} photos with {interval_sec:g}s between captures: "
+        + ", ".join(details)
+    )
 
 
 @log_tool_call

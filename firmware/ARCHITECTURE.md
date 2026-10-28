@@ -301,7 +301,7 @@ All services share one server and advertise as **ApiBLE**. UUID suffix
 | | `CA04` | Read | Frame info JSON: `{"size":N,"w":W,"h":H,"q":Q}` |
 | | `CA05` | Read | Settings schema JSON |
 | `BA00` GPIO | `BA01` | Write | `pin=<n>:<out\|in\|ain>`, `set=<n>:<0\|1>`, `get=<n>`, `led=<color>` |
-| | `BA02` | Read | State string, e.g. `led=no_led,pin1=1` |
+| | `BA02` | Read | State: `led=<led>,<pin#>:<value>:<type>,...` e.g. `led=no_led,1:1:out` |
 | `CF00` Config | `CF01` | Write | `key=value,key=value,...` |
 | | `CF02` | Read | Full state string |
 | | `CF03` | Read | Schema: `key:type:default,...` |

@@ -7,7 +7,12 @@ from agent_harness.model_config import ModelConfig
 from agent_harness.prompts import StaticPrompts
 from agent_harness.tools import ToolRegistry
 
-from camera_agent.tools import describe_picture, take_picture, take_picture_with_flash
+from camera_agent.tools import (
+    describe_picture,
+    take_picture,
+    take_pictures,
+    take_picture_with_flash,
+)
 
 
 def create_agent() -> ManagedAgent:
@@ -47,16 +52,21 @@ def create_agent() -> ManagedAgent:
         )
         .with_model_settings({"temperature": temperature})
         .with_tools(ToolRegistry().add_many(
-            take_picture, take_picture_with_flash, describe_picture))
+            take_picture, take_pictures, take_picture_with_flash, describe_picture))
         .with_prompts(StaticPrompts(
             "You are a camera assistant for an ESP32-S3 BLE camera.\n"
             "Call tools immediately without narrating your plan.\n"
             "To capture a normal photo, call take_picture exactly once.\n"
+            "To capture multiple normal photos, call take_pictures exactly once "
+            "with count and interval_sec. Do not call take_picture repeatedly "
+            "when the user specifies a count or delay.\n"
+            "take_pictures never uses flash.\n"
             "Call take_picture_with_flash ONLY when the user explicitly asks "
             "to use or turn on the flash. Never infer flash from low light.\n"
             "If the user asks to turn the flash on and take a photo, call "
             "take_picture_with_flash exactly once.\n"
-            "Never call both capture tools for the same request.\n"
+            "Never call more than one capture tool for the same request.\n"
+            "Never claim a delay unless a tool enforced it.\n"
             "If the user asks for a photo, call the matching capture tool; "
             "never claim you cannot take one.\n"
             "Never claim you cannot control the flash; use the appropriate tool.\n"

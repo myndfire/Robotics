@@ -112,7 +112,7 @@ uv run python test_api_ble.py --clear-config          # clear all config
 | Char | UUID | Properties | Purpose |
 |---|---|---|---|
 | BA01 | `0000BA01-...` | Write | Commands: `pin=1:out`, `set=1:1`, `get=14`, `led=red` |
-| BA02 | `0000BA02-...` | Read | Status: `led=off,pin1=1,pin14=512,...` |
+| BA02 | `0000BA02-...` | Read | Status: `led=no_led,1:1:out,14:512:ain,...` |
 
 Supported pins on ESP32-S3-CAM: **1, 14, 40, 41, 42** (40/41/42 are strapping pins — avoid external pull-down at boot).
 

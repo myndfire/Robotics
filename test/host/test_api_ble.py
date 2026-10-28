@@ -47,7 +47,7 @@ via three BLE services (CA00, BA00, CF00).
 
     GPIO    BA00:
       BA01 Write  — "pin=1:out", "set=1:1", "get=1", "led=red"
-      BA02 Read   — status string
+      BA02 Read   — "led=<led>,<pin#>:<value>:<type>,..."
 
     Config  CF00:
       CF01 Write  — "key=val,key=val,..."
@@ -187,10 +187,12 @@ async def main():
             await client.set_led(args.led)
 
         if args.gpio_state:
-            state = await client.read_gpio_state()
+            metadata = await client.read_gpio_metadata()
             print("── GPIO State ──")
-            for k, v in sorted(state.items()):
-                print(f"  {k}: {v}")
+            print(f"  led: {metadata['led']}")
+            for pin in sorted(metadata["pins"]):
+                info = metadata["pins"][pin]
+                print(f"  pin {pin}: {info['type']} = {info['value']}")
 
         # ── Config ───────────────────────────────────────────────
         if args.config:

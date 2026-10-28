@@ -44,7 +44,7 @@ Robotics/
     ├── src/camera_agent/
     │   ├── main.py            → CLI entry point
     │   ├── agent_factory.py   → ManagedAgent with camera tools
-    │   ├── tools/             → Agent tools (take_picture, describe_picture)
+    │   ├── tools/             → Agent tools (capture, describe)
     │   │   ├── _debug.py      → Shared logging decorator
     │   │   ├── capture.py     → BLE camera capture tool
     │   │   └── describe.py    → Vision model description tool
@@ -128,7 +128,7 @@ Only an **app image** runs on the device. Drivers and services are libraries com
 
 ```
 camera_agent (Python)
-    └─ camera_agent.tools.take_picture
+    └─ camera_agent.tools.take_picture / take_pictures
          └─ ApiBleClient
               └─ bleak (BLE GATT)
                    └─ ApiBLE (ESP32 firmware)
