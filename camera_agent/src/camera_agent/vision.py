@@ -24,7 +24,9 @@ from agent_harness.memory import MessageHistory
 from agent_harness.model_config import ModelConfig
 from agent_harness.prompts import StaticPrompts
 
-_DEFAULT_MODEL = "llava"
+_DEFAULT_MODEL = "Qwen3-VL-4B-Instruct-4bit"
+_DEFAULT_PROVIDER = "openai"
+_DEFAULT_BASE_URL = "http://localhost:8000/v1"
 
 _DEFAULT_PROMPT = (
     "Describe what you see in this image. Be specific and factual. "
@@ -36,9 +38,51 @@ def resolve_model() -> str:
     """Resolve which vision model to use.
 
     Returns:
-        str: Model name from CAMERA_AGENT_VISION_MODEL, defaulting to llava.
+        str: Model name from CAMERA_AGENT_VISION_MODEL, defaulting to
+        Qwen3-VL-4B-Instruct-4bit.
     """
     return os.getenv("CAMERA_AGENT_VISION_MODEL", _DEFAULT_MODEL)
+
+
+def resolve_provider() -> str:
+    """Resolve the vision model provider.
+
+    Returns:
+        str: CAMERA_AGENT_VISION_PROVIDER, falling back to
+        CAMERA_AGENT_PROVIDER, then openai.
+    """
+    return os.getenv(
+        "CAMERA_AGENT_VISION_PROVIDER",
+        os.getenv("CAMERA_AGENT_PROVIDER", _DEFAULT_PROVIDER),
+    )
+
+
+def resolve_base_url() -> str | None:
+    """Resolve the vision model endpoint.
+
+    Returns:
+        str | None: CAMERA_AGENT_VISION_BASE_URL, falling back to
+        CAMERA_AGENT_BASE_URL, or None when neither is set.
+    """
+    return (
+        os.getenv("CAMERA_AGENT_VISION_BASE_URL")
+        or os.getenv("CAMERA_AGENT_BASE_URL")
+        or None
+    )
+
+
+def resolve_api_key() -> str | None:
+    """Resolve the API key for the vision model endpoint.
+
+    Returns:
+        str | None: CAMERA_AGENT_VISION_API_KEY, falling back to
+        CAMERA_AGENT_API_KEY, or None when neither is set.
+    """
+    return (
+        os.getenv("CAMERA_AGENT_VISION_API_KEY")
+        or os.getenv("CAMERA_AGENT_API_KEY")
+        or None
+    )
 
 
 @dataclass
@@ -75,7 +119,14 @@ def create_vision_agent() -> ManagedAgent:
     """
     return (
         ManagedAgent()
-        .with_model(ModelConfig(provider="ollama", model_name=resolve_model()))
+        .with_model(
+            ModelConfig(
+                provider=resolve_provider(),
+                model_name=resolve_model(),
+                base_url=resolve_base_url(),
+                api_key=resolve_api_key(),
+            )
+        )
         .with_prompts(
             StaticPrompts(
                 "Describe the image factually. Say if unclear."
@@ -115,17 +166,24 @@ async def describe_image(image_bytes: bytes, question: str = "") -> VisionResult
         model = resolve_model()
         detail = str(exc)
         if "404" in detail and "model" in detail.lower():
+            base_url = resolve_base_url() or _DEFAULT_BASE_URL
             return VisionResult(
                 error=(
                     f"Vision model '{model}' returned 404. "
-                    f"Confirm the model is installed with: ollama pull {model}"
+                    f"Confirm it is served at {base_url} "
+                    f"(check: curl {base_url}/models)."
                 )
             )
-        if "ConnectError" in type(exc).__name__:
+        if (
+            "ConnectError" in type(exc).__name__
+            or "connection" in detail.lower()
+        ):
+            base_url = resolve_base_url() or _DEFAULT_BASE_URL
             return VisionResult(
                 error=(
-                    f"Could not reach Ollama ({type(exc).__name__}). "
-                    "Confirm Ollama is running, or set OLLAMA_BASE_URL."
+                    f"Could not reach the model server at {base_url} "
+                    f"({type(exc).__name__}). Confirm it is running, or set "
+                    f"CAMERA_AGENT_BASE_URL."
                 )
             )
         return VisionResult(

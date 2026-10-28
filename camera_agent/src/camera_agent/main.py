@@ -11,6 +11,8 @@ Prerequisites:
 """
 
 import asyncio
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()  # read .env into os.environ before any module imports env vars
@@ -19,9 +21,30 @@ from camera_agent.agent_factory import create_agent
 from agent_harness.memory import MessageHistory
 
 
+_DEFAULT_BASE_URL = "http://localhost:8000/v1"
+
+
 def _print_response(text: str) -> None:
     """Print agent response in bright cyan to distinguish it from logs."""
     print(f"\033[96m{text}\033[0m")
+
+
+def _print_error(exc: Exception) -> None:
+    """Print an actionable message when the model server is unreachable."""
+    detail = str(exc)
+    lowered = detail.lower()
+    if (
+        "connection error" in lowered
+        or "connection refused" in lowered
+        or "connecterror" in lowered
+    ):
+        base_url = os.getenv("CAMERA_AGENT_BASE_URL", _DEFAULT_BASE_URL)
+        print(
+            f"Error: could not reach the model server at {base_url}.\n"
+            f"  Is vLLM running? Check with: curl {base_url}/models"
+        )
+        return
+    print(f"Error: {exc}")
 
 
 async def main():
@@ -46,7 +69,7 @@ async def main():
             result = await agent.run(prompt, MessageHistory(), "camera-session")
             _print_response(result.output)
         except Exception as e:
-            print(f"Error: {e}")
+            _print_error(e)
 
 
 if __name__ == "__main__":

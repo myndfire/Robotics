@@ -1,7 +1,7 @@
 """Vision image description tool — ``describe_picture``.
 
 Delegates to :mod:`camera_agent.vision` which runs a separate
-``ManagedAgent`` with the vision model (e.g. ``llava``). The main
+``ManagedAgent`` with the vision model (e.g. Qwen3-VL). The main
 conversational model never sees image pixels, so description must
 come from this tool rather than from its imagination.
 """
@@ -16,7 +16,7 @@ from camera_agent.vision import describe_image
 async def describe_picture(image_path: str = "snapshot.jpg", question: str = "") -> str:
     """Describe the contents of a photo on disk using a vision model.
 
-    Sends the actual JPEG bytes to a local vision model (llava by default)
+    Sends the actual JPEG bytes to a vision model (Qwen3-VL by default)
     and returns what that model reports seeing. Always use this tool to
     describe an image — never describe an image from memory or assumption,
     because the calling model cannot see image content.

@@ -1,12 +1,12 @@
 # Camera Agent
 
-A managed AI agent that controls an ESP32-S3 BLE camera using natural language. It uses two models: a text model for conversation and a vision model for image understanding.
+A managed AI agent that controls an ESP32-S3 BLE camera using natural language. It uses a conversational model for tool calling and a vision model for image understanding; a single multimodal model (the default, `Qwen3-VL-4B-Instruct-4bit`) can serve both roles.
 
 ## Architecture
 
-### Two-Model Design
+### Model Design
 
-The agent uses two specialized models because the model that is good at conversation is not the model that can see images:
+The default setup uses one multimodal model served by vLLM. The two roles are still separate agents, so the vision model can be pointed at a different endpoint or model via environment variables.
 
 ```
 User: "take a picture and describe it"
@@ -14,7 +14,7 @@ User: "take a picture and describe it"
    ▼
 ┌─────────────────────────────────────────────────┐
 │  Main Agent (CAMERA_AGENT_MODEL)                │
-│  Default: gpt-oss:20b via Ollama                │
+│  Default: Qwen3-VL-4B-Instruct-4bit via vLLM    │
 │  • Conversational reasoning                       │
 │  • Tool calling (take_picture, describe_picture) │
 │  • Answers user questions                        │
@@ -29,12 +29,12 @@ User: "take a picture and describe it"
 └──────┬───────┘      └──────┬───────┘
        │                      │
        ▼                      ▼
-  ApiBLE               llava
+  ApiBLE               Qwen3-VL
   (BLE device)          (Vision model)
        │                      │
        ▼                      ▼
   snapshot.jpg          Description
-  (4-6KB JPEG)          (Text from llava)
+  (4-6KB JPEG)          (Text from Qwen3-VL)
 ```
 
 ### Request Flow
@@ -72,7 +72,7 @@ camera_agent/
 | **Firmware** | ApiBLE firmware flashed on ESP32-S3 |
 | **Host OS** | macOS, Linux, or Windows with Bluetooth |
 | **Python** | 3.11+ with [uv](https://docs.astral.sh/uv/) |
-| **LLM** | Ollama running locally (for both text and vision models) |
+| **LLM** | vLLM (or any OpenAI-compatible server) serving a multimodal model such as `Qwen3-VL-4B-Instruct-4bit` |
 
 ## Setup
 
@@ -89,19 +89,23 @@ uv run pio run --target monitor
 # You should see: "Advertising as ApiBLE"
 ```
 
-### 2. Install Ollama and Pull Models
+### 2. Serve a Model with vLLM
+
+The agent talks to any OpenAI-compatible endpoint. The default configuration targets vLLM on port 8000 with tool calling enabled:
 
 ```bash
-# Install Ollama (macOS)
-brew install ollama
-
-# Start Ollama
-ollama serve
-
-# Pull models (in another terminal)
-ollama pull gpt-oss:20b    # Main conversation model
-ollama pull llava          # Vision model for image description
+vllm serve /path/to/Qwen3-VL-4B-Instruct-4bit \
+  --served-model-name Qwen3-VL-4B-Instruct-4bit \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes
 ```
+
+Verify the server is up and note the served model name:
+```bash
+curl http://localhost:8000/v1/models
+```
+
+Tool calling is required: without `--enable-auto-tool-choice` and a matching `--tool-call-parser`, the model cannot call `take_picture` or `describe_picture`. Ollama remains usable by pointing `CAMERA_AGENT_PROVIDER` / `CAMERA_AGENT_BASE_URL` at it.
 
 ### 3. Configure Environment
 
@@ -112,12 +116,14 @@ cp .env.example .env
 
 Edit `.env`:
 ```bash
-# LLM configuration
-CAMERA_AGENT_PROVIDER=ollama
-CAMERA_AGENT_MODEL=gpt-oss:20b
+# LLM configuration (vLLM exposes an OpenAI-compatible API)
+CAMERA_AGENT_PROVIDER=openai
+CAMERA_AGENT_MODEL=Qwen3-VL-4B-Instruct-4bit
+CAMERA_AGENT_BASE_URL=http://localhost:8000/v1
+CAMERA_AGENT_API_KEY=EMPTY
 
-# Vision model (always via Ollama)
-CAMERA_AGENT_VISION_MODEL=llava
+# Vision model (multimodal; can be a different endpoint/model if needed)
+CAMERA_AGENT_VISION_MODEL=Qwen3-VL-4B-Instruct-4bit
 
 # BLE device name (must match firmware)
 CAMERA_AGENT_DEVICE=ApiBLE
@@ -177,16 +183,20 @@ The walls appear to be white or off-white.
 
 | Variable | Default | Description |
 |---|---|---|
-| `CAMERA_AGENT_PROVIDER` | `ollama` | LLM provider (ollama, openai, anthropic, etc.) |
-| `CAMERA_AGENT_MODEL` | `gpt-oss:20b` | Main model for conversation and tool calling |
-| `CAMERA_AGENT_VISION_MODEL` | `llava` | Vision model for image description (always Ollama) |
+| `CAMERA_AGENT_PROVIDER` | `openai` | Provider name; `openai` for vLLM's OpenAI-compatible API |
+| `CAMERA_AGENT_MODEL` | `Qwen3-VL-4B-Instruct-4bit` | Main model for conversation and tool calling |
+| `CAMERA_AGENT_BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible endpoint (vLLM) |
+| `CAMERA_AGENT_API_KEY` | `EMPTY` | API key; vLLM accepts any non-empty value |
+| `CAMERA_AGENT_VISION_MODEL` | `Qwen3-VL-4B-Instruct-4bit` | Vision model for image description |
+| `CAMERA_AGENT_VISION_PROVIDER` | falls back to `CAMERA_AGENT_PROVIDER` | Optional provider override for the vision agent |
+| `CAMERA_AGENT_VISION_BASE_URL` | falls back to `CAMERA_AGENT_BASE_URL` | Optional endpoint override for the vision agent |
+| `CAMERA_AGENT_VISION_API_KEY` | falls back to `CAMERA_AGENT_API_KEY` | Optional API key override for the vision agent |
 | `CAMERA_AGENT_DEVICE` | `ApiBLE` | BLE device name to scan for |
 | `CAMERA_AGENT_AEC` | `off` | Auto-exposure applied on capture (`on`/`off`) |
 | `CAMERA_AGENT_SHUTTER` | `300` | Exposure value applied on capture (lower = less motion blur, darker) |
 | `CAMERA_AGENT_GAIN` | `20` | Sensor gain applied on capture (higher = brighter, noisier) |
 | `CAMERA_AGENT_BLE_MTU` | `517` | Local ATT MTU cap (23–517) for faster BLE transfer |
 | `CAMERA_AGENT_CHUNK_DELAY_MS` | `2` | BLE notify chunk delay in ms (lower = faster transfer) |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `CAMERA_AGENT_DEBUG` | `0` | Enable tool execution logging (1/true/yes) |
 
 ## Debug Mode
@@ -216,11 +226,11 @@ Photo saved to snapshot.jpg (5619 bytes)
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Device 'ApiBLE' not found` | Board not powered / not advertising | Check USB, press RST, verify firmware flashed |
-| `Vision model 'llava' returned 404` | llava not pulled | `ollama pull llava` |
-| `Could not reach Ollama` | Ollama not running | Start `ollama serve` |
+| `Vision model '...' returned 404` | Served model name mismatch | Check `curl http://localhost:8000/v1/models` and match `CAMERA_AGENT_VISION_MODEL` to the served name |
+| `Could not reach the model server` | vLLM not running / wrong `CAMERA_AGENT_BASE_URL` | Start vLLM and verify with `curl http://localhost:8000/v1/models` |
 | Agent describes things not in photo | Main model hallucinating | Check `describe_picture` output in debug mode; vision model sees pixels, main model only sees text |
 | Agent takes 2+ photos for 1 request | Main model misunderstanding | System prompt says "exactly once"; shorten prompt if too complex |
-| Agent outputs raw JSON instead of calling tool | System prompt too long for model | Keep prompt concise (under 100 words for gpt-oss:20b) |
+| Agent outputs raw JSON instead of calling tool | Tool calling disabled on the server, or prompt too long | Restart vLLM with `--enable-auto-tool-choice --tool-call-parser hermes`; keep the prompt concise |
 | Description seems wrong | Vision model misidentifying | Expected for small objects in 320x240 frames; increase camera quality in firmware |
 | Fast object still blurry | Shutter too long | Lower `CAMERA_AGENT_SHUTTER` (e.g. 150) and raise `CAMERA_AGENT_GAIN` to compensate; tune per scene via `take_picture(shutter=..., gain=...)` |
 | Fast-motion shot too dark / noisy | Gain/ISO too low or high | Raise `shutter` or `gain`; for noise, raise `shutter` and lower `gain` |
@@ -228,14 +238,14 @@ Photo saved to snapshot.jpg (5619 bytes)
 
 ## Architecture Details
 
-### Why Two Models?
+### Why Two Agents?
 
-| Model | Role | Input | Output | Size |
-|---|---|---|---|---|
-| **gpt-oss:20b** | Conversation, tool calling | Text prompt | Tool calls + text answer | ~13GB |
-| **llava** | Image understanding | JPEG pixels | Text description | ~4.7GB |
+| Model | Role | Input | Output |
+|---|---|---|---|
+| **Qwen3-VL-4B-Instruct-4bit** | Conversation, tool calling | Text prompt | Tool calls + text answer |
+| **Qwen3-VL-4B-Instruct-4bit** | Image understanding | JPEG pixels | Text description |
 
-A single model cannot do both well. gpt-oss:20b is text-only (would hallucinate descriptions). llava is vision-only (weak at tool calling and conversation).
+The two roles run as separate `ManagedAgent` instances so the vision model can be swapped independently (via `CAMERA_AGENT_VISION_*`) without touching the conversational agent. A multimodal model like Qwen3-VL serves both roles in the default setup; if you use a text-only main model, point the vision agent at a separate vision model instead.
 
 ### Data Flow
 
@@ -245,7 +255,7 @@ User Text
     ▼
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │ Main Agent  │────→│ take_picture│────→│ ApiBLE     │
-│ (gpt-oss)   │     │ (BLE tool)  │     │ (Hardware)  │
+│ (Qwen3-VL)  │     │ (BLE tool)  │     │ (Hardware)  │
 └─────────────┘     └─────────────┘     └──────┬──────┘
     │                                            │
     │         ┌──────────────────────────────────┘
@@ -253,7 +263,7 @@ User Text
     │    snapshot.jpg (JPEG)
     │         │
     │    ┌────┴────┐
-    └───→│ describe│────→ llava (vision model)
+    └───→│ describe│────→ Qwen3-VL (vision model)
          │ _picture│         └──→ Text description
          └────┬────┘
               │

@@ -48,7 +48,7 @@ Robotics/
     │   │   ├── _debug.py      → Shared logging decorator
     │   │   ├── capture.py     → BLE camera capture tool
     │   │   └── describe.py    → Vision model description tool
-    │   └── vision.py          → Vision agent (llava via ManagedAgent)
+    │   └── vision.py          → Vision agent (Qwen3-VL via ManagedAgent)
     ├── README.md
     └── .env.example
 ```
@@ -91,7 +91,7 @@ uv run python test/host/test_api_ble.py --config tenant_id=abc
 ```bash
 cd camera_agent
 cp .env.example .env
-# Edit .env: set CAMERA_AGENT_DEVICE, pull llava with ollama
+# Edit .env: set CAMERA_AGENT_DEVICE and the vLLM endpoint/model
 uv sync
 uv run python -m camera_agent.main
 ```
@@ -122,7 +122,7 @@ camera_agent (Python)
 camera_agent (Python)
     └─ camera_agent.tools.describe_picture
          └─ camera_agent.vision.describe_image
-              └─ ManagedAgent + llava (Ollama)
+              └─ ManagedAgent + Qwen3-VL (vLLM)
               
 test/host/test_api_ble.py (Python)
     └─ ApiBleClient
@@ -143,9 +143,9 @@ test/host/test_api_ble.py (Python)
 
 ## Key Design Decisions
 
-### Why two models in camera_agent?
+### Why two agents in camera_agent?
 
-The conversational model (`gpt-oss:20b`) is text-only — it would hallucinate image descriptions. The vision model (`llava`) sees pixels but is weak at conversation. The agent composes them: text model decides when to capture/describe, vision model provides factual descriptions.
+The conversational agent decides when to capture/describe and calls tools. A separate vision agent receives the JPEG pixels, so image descriptions never depend on the text model guessing. Both roles default to the multimodal `Qwen3-VL-4B-Instruct-4bit` served by vLLM, but the vision agent can be pointed at a different endpoint or model via `CAMERA_AGENT_VISION_*`.
 
 ### Why separate device drivers and services?
 

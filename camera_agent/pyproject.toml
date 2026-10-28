@@ -5,7 +5,6 @@ requires-python = ">=3.11"
 dependencies = [
     "agent-harness",
     "embedded-system-services",
-    "opentelemetry-api>=1.27,<1.30",
 ]
 
 [build-system]
